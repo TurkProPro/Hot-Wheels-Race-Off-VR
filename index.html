@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Dual Controller Grab & Physics</title>
+  <title>Hot Wheels MR - Ultra-Precision Grab (1cm Radius)</title>
   <style>
     body {
       margin: 0;
@@ -49,7 +49,7 @@
   var speed = 0;
 
   // Fizik & Tutma Değişkenleri
-  var activeGrabber = null; // 'left' veya 'right' (hangi el tutuyor)
+  var activeGrabber = null; // 'left' veya 'right'
   var velocity = new THREE.Vector3(0, 0, 0); 
   var angularVelocity = new THREE.Vector3(0, 0, 0); 
   
@@ -58,6 +58,8 @@
   
   var GRAVITY = -9.81;
   var FLOOR_Y = 0.0125;
+  var GRAB_RADIUS = 0.01; // 1 cm ultratemas mesafesi
+
   var leftController = null;
   var rightController = null;
   var isSpawnedAtUser = false;
@@ -101,7 +103,7 @@
     var light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
     scene.add(light);
 
-    // Rip Rod Kutu Gövdesi
+    // Kutu Gövdesi
     var carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
     var carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
@@ -109,7 +111,7 @@
     carMesh.position.set(0, FLOOR_Y, -0.5);
     scene.add(carMesh);
 
-    // İki Kumandayı da Sahneye Tanımla
+    // Kumandaları Tanımla
     leftController = renderer.xr.getController(0);
     scene.add(leftController);
 
@@ -150,10 +152,9 @@
         var source = session.inputSources[i];
         if (!source.gamepad) continue;
 
-        // Sağ Kumanda (Gaz / Fren & Tutma Tetiği)
+        // Sağ Kumanda (Gaz / Fren & Tutma)
         if (source.handedness === 'right') {
           if (source.gamepad.buttons[0] && (source.gamepad.buttons[0].pressed || source.gamepad.buttons[0].value > 0.1)) {
-            // Araba tutulmuyorsa sağ tetik gaz işlevi görür
             if (!activeGrabber) isMovingForward = true;
             rightTriggerPressed = true;
           }
@@ -162,7 +163,7 @@
           }
         }
 
-        // Sol Kumanda (Direksiyon & Tutma Tetiği)
+        // Sol Kumanda (Direksiyon & Tutma)
         if (source.handedness === 'left') {
           if (source.gamepad.axes.length >= 2) {
             var axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
@@ -178,7 +179,7 @@
       }
     }
 
-    // İKİ EL İÇİN TUTMA / FIRLATMA MANTIĞI
+    // İKİ EL İÇİN TUTMA MANTIĞI (1 CM EŞİĞİ)
     var activeController = null;
 
     var leftPos = new THREE.Vector3();
@@ -190,18 +191,17 @@
     var distLeft = leftPos.distanceTo(carMesh.position);
     var distRight = rightPos.distanceTo(carMesh.position);
 
-    // Hangi elin arabayı yakalayacağına karar ver
-    if (leftTriggerPressed && (distLeft < 0.20 || activeGrabber === 'left')) {
+    if (leftTriggerPressed && (distLeft < GRAB_RADIUS || activeGrabber === 'left')) {
       activeGrabber = 'left';
       activeController = leftController;
-    } else if (rightTriggerPressed && (distRight < 0.20 || activeGrabber === 'right')) {
+    } else if (rightTriggerPressed && (distRight < GRAB_RADIUS || activeGrabber === 'right')) {
       activeGrabber = 'right';
       activeController = rightController;
     } else {
-      activeGrabber = null; // İki tetik de bırakıldıysa araba serbest kalır
+      activeGrabber = null;
     }
 
-    // Pozisyon & Açısal Takip (Arabayı Tutma Anı)
+    // Pozisyon & Açısal Takip (Tutma Anı)
     if (activeController) {
       var controllerPos = new THREE.Vector3();
       var controllerQuat = new THREE.Quaternion();
@@ -210,17 +210,14 @@
       activeController.getWorldQuaternion(controllerQuat);
 
       if (delta > 0) {
-        // İlk tutulduğu kare ise referans noktalarını ayarla
         if (lastControllerPos.lengthSq() === 0) {
           lastControllerPos.copy(controllerPos);
           lastControllerEuler.setFromQuaternion(controllerQuat, 'XYZ');
         }
 
-        // Çizgisel Hız Hesabı
         velocity.subVectors(controllerPos, lastControllerPos).divideScalar(delta);
         lastControllerPos.copy(controllerPos);
 
-        // Açısal Hız Hesabı (Takla / Dönme)
         var currentEuler = new THREE.Euler().setFromQuaternion(controllerQuat, 'XYZ');
         angularVelocity.set(
           (currentEuler.x - lastControllerEuler.x) / delta,
@@ -234,7 +231,6 @@
       carMesh.quaternion.copy(controllerQuat);
 
     } else {
-      // Elden bırakıldığında referans pozisyonlarını sıfırla
       lastControllerPos.set(0, 0, 0);
     }
 
