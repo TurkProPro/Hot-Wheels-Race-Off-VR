@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Precision Grab (3cm Radius)</title>
+  <title>Hot Wheels MR - Precision Grab (5cm Radius)</title>
   <style>
     body {
       margin: 0;
@@ -31,7 +31,6 @@
     }
   </style>
 
-  <!-- Three.js Kütüphanesi -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -60,7 +59,7 @@
   
   var GRAVITY = -9.81;
   var FLOOR_Y = 0.0125;
-  var GRAB_RADIUS = 0.03; // 3 cm dengeli temas mesafesi
+  var GRAB_RADIUS = 0.05; // 5 cm yakalama mesafesi
 
   var leftController = null;
   var rightController = null;
@@ -151,7 +150,7 @@
       turnValue = 0;
 
       for (var i = 0; i < session.inputSources.length; i++) {
-        var source = session.inputSources[i];
+        var source = source = session.inputSources[i];
         if (!source.gamepad) continue;
 
         // Sağ Kumanda
@@ -181,7 +180,7 @@
       }
     }
 
-    // TUTMA TESPİTİ VE MESAFE KONTROLÜ (3 CM)
+    // TUTMA TESPİTİ VE MESAFE KONTROLÜ (5 CM)
     var leftPos = new THREE.Vector3();
     var rightPos = new THREE.Vector3();
 
