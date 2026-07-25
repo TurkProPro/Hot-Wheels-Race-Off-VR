@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Precision Grab (5cm Radius)</title>
+  <title>Hot Wheels MR - Realistic Ground Physics</title>
   <style>
     body {
       margin: 0;
@@ -31,6 +31,7 @@
     }
   </style>
 
+  <!-- Three.js Kütüphanesi -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -59,7 +60,7 @@
   
   var GRAVITY = -9.81;
   var FLOOR_Y = 0.0125;
-  var GRAB_RADIUS = 0.05; // 5 cm yakalama mesafesi
+  var GRAB_RADIUS = 0.05; // 5 cm
 
   var leftController = null;
   var rightController = null;
@@ -150,7 +151,7 @@
       turnValue = 0;
 
       for (var i = 0; i < session.inputSources.length; i++) {
-        var source = source = session.inputSources[i];
+        var source = session.inputSources[i];
         if (!source.gamepad) continue;
 
         // Sağ Kumanda
@@ -180,7 +181,7 @@
       }
     }
 
-    // TUTMA TESPİTİ VE MESAFE KONTROLÜ (5 CM)
+    // TUTMA TESPİTİ VE MESAFE KONTROLÜ
     var leftPos = new THREE.Vector3();
     var rightPos = new THREE.Vector3();
 
@@ -200,7 +201,6 @@
       activeGrabber = null;
     }
 
-    // İlk tutulma anını yakala
     if (activeGrabber && !prevGrabber) {
       isJustGrabbed = true;
     }
@@ -223,11 +223,9 @@
           angularVelocity.set(0, 0, 0);
           isJustGrabbed = false;
         } else if (delta > 0) {
-          // Çizgisel Hız
           velocity.subVectors(controllerPos, lastControllerPos).divideScalar(delta);
           lastControllerPos.copy(controllerPos);
 
-          // Açısal Hız (Takla)
           var currentEuler = new THREE.Euler().setFromQuaternion(controllerQuat, 'XYZ');
           angularVelocity.set(
             (currentEuler.x - lastControllerEuler.x) / delta,
@@ -241,7 +239,7 @@
         carMesh.quaternion.copy(controllerQuat);
       }
     } 
-    // SERBEST DÜŞÜŞ VE FİZİK
+    // SERBEST DÜŞÜŞ VE ZEMİN FİZİĞİ
     else {
       // 1. Havadaysa Yerçekimi ve Dönme
       if (carMesh.position.y > FLOOR_Y) {
@@ -256,15 +254,26 @@
       carMesh.position.y += velocity.y * delta;
       carMesh.position.z += velocity.z * delta;
 
-      // 2. Zemine Çarpma Anı
+      // 2. Zemine Çarpma Anı VE Yüzeye Düzgün Yatırma
       if (carMesh.position.y <= FLOOR_Y) {
         carMesh.position.y = FLOOR_Y;
         velocity.y = 0;
 
-        angularVelocity.multiplyScalar(0.3);
+        // Açısal hızı sönümle
+        angularVelocity.multiplyScalar(0.1);
 
-        velocity.x *= 0.88;
-        velocity.z *= 0.88;
+        // Arabayı yere yerçekimi etkisiyle yatır (Pitch & Roll düzeltmesi)
+        var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
+        
+        // X ve Z açısını sıfıra yumuşakça çek (Zemine yatma)
+        currentEuler.x = THREE.MathUtils.lerp(currentEuler.x, 0, 0.15);
+        currentEuler.z = THREE.MathUtils.lerp(currentEuler.z, 0, 0.15);
+
+        carMesh.quaternion.setFromEuler(currentEuler);
+
+        // Sürtünme
+        velocity.x *= 0.85;
+        velocity.z *= 0.85;
       }
 
       // 3. Kumanda ile Sürüş (Sadece araba düz duruyorsa)
