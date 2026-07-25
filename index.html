@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Rip Rod</title>
+  <title>Hot Wheels MR - Physics & Drive</title>
   <style>
     body {
       margin: 0;
@@ -48,8 +48,13 @@
   let turnValue = 0;
   let speed = 0;
 
-  // Quest'in Gerçek Oda Sınır Noktaları (Boundary Geometry)
-  let boundaryPolygon = [];
+  // Fizik ve Ele Alma Değişkenleri
+  let isGrabbed = false;
+  let verticalVelocity = 0;
+  const GRAVITY = -9.81;
+  const FLOOR_Y = 0.0125; // Arabanın taban yüksekliği (Zemin)
+  let leftController = null;
+  let isSpawnedAtUser = false;
 
   const startBtn = document.getElementById('start-btn');
 
@@ -60,9 +65,8 @@
     }
 
     try {
-      // 'bounded-floor' ile Quest'in çizili sınır haritasını istiyoruz
       const session = await navigator.xr.requestSession('immersive-ar', {
-        optionalFeatures: ['hit-test', 'dom-overlay', 'bounded-floor', 'local-floor'],
+        optionalFeatures: ['hit-test', 'dom-overlay', 'local-floor', 'bounded-floor'],
         domOverlay: { root: document.body }
       });
 
@@ -74,15 +78,14 @@
     }
   });
 
-  async function initThreeJS(session) {
+  function initThreeJS(session) {
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 20);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
-    
-    // Öncelik Quest'in çizili sınırında (bounded-floor)
+
     try {
       renderer.xr.setReferenceSpaceType('bounded-floor');
     } catch(e) {
@@ -92,13 +95,6 @@
     renderer.xr.setSession(session);
     document.body.appendChild(renderer.domElement);
 
-    // Quest Oda Sınır Geometrisini Çekme
-    session.requestReferenceSpace('bounded-floor').then((refSpace) => {
-      if (refSpace.boundsGeometry) {
-        boundaryPolygon = Array.from(refSpace.boundsGeometry).map(pt => ({ x: pt.x, z: pt.z }));
-      }
-    }).catch(() => {});
-
     // Işık
     const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
     scene.add(light);
@@ -107,30 +103,39 @@
     const carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
     const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
-
-    // Arabayı tam zemine oturt
-    carMesh.position.set(0, 0.0125, -1.0);
+    
+    // Geçici olarak sahneye ekle (İlk karede headset koordinatlarına çekilecek)
+    carMesh.position.set(0, FLOOR_Y, -0.5);
     scene.add(carMesh);
+
+    // Kumanda Temsilcileri
+    leftController = renderer.xr.getController(0);
+    scene.add(leftController);
 
     renderer.setAnimationLoop(render);
   }
 
-  // Nokta Poligonun İçinde mi Kontrolü (Ray-Casting Algoritması)
-  function isInsideBoundary(point, polygon) {
-    if (!polygon || polygon.length < 3) return true; // Sınır çekilemediyse serbest bırak
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const xi = polygon[i].x, zi = polygon[i].z;
-      const xj = polygon[j].x, zj = polygon[j].z;
-      const intersect = ((zi > point.z) !== (zj > point.z)) &&
-          (point.x < (xj - xi) * (point.z - zi) / (zj - zi) + xi);
-      if (intersect) inside = !inside;
-    }
-    return inside;
-  }
+  let lastTime = performance.now();
 
   function render(time, frame) {
     const session = renderer.xr.getSession();
+    const delta = (time - lastTime) / 1000;
+    lastTime = time;
+
+    // 1. HEADSET KOORDİNATLARINDA DOĞMA (İmha Bug'ı Çözümü)
+    if (!isSpawnedAtUser && camera) {
+      const camPos = new THREE.Vector3();
+      camera.getWorldPosition(camPos);
+      
+      // Eğer kamera konum almaya başladıysa arabayı doğrudan kullanıcının X ve Z hizasına koy
+      if (Math.abs(camPos.x) > 0.001 || Math.abs(camPos.z) > 0.001) {
+        carMesh.position.set(camPos.x, FLOOR_Y, camPos.z - 0.4);
+        isSpawnedAtUser = true;
+      }
+    }
+
+    let leftTriggerPressed = false;
+    let leftControllerPos = new THREE.Vector3();
 
     if (session && session.inputSources) {
       isMovingForward = false;
@@ -140,53 +145,80 @@
       for (const source of session.inputSources) {
         if (!source.gamepad) continue;
 
-        // SAĞ KUMANDA (İleri / Geri)
+        // SAĞ KUMANDA (Gaz / Fren)
         if (source.handedness === 'right') {
-          if (source.gamepad.buttons[0] && source.gamepad.buttons[0].pressed) {
+          // Trigger (İleri)
+          if (source.gamepad.buttons[0] && (source.gamepad.buttons[0].pressed || source.gamepad.buttons[0].value > 0.1)) {
             isMovingForward = true;
           }
-          if (source.gamepad.buttons[1] && source.gamepad.buttons[1].pressed) {
+          // Squeeze/Grip (Geri)
+          if (source.gamepad.buttons[1] && (source.gamepad.buttons[1].pressed || source.gamepad.buttons[1].value > 0.1)) {
             isMovingBackward = true;
           }
         }
 
-        // SOL KUMANDA (Direksiyon)
+        // SOL KUMANDA (Direksiyon & Ele Alma)
         if (source.handedness === 'left') {
+          // Direksiyon
           if (source.gamepad.axes.length >= 2) {
             const axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
             if (Math.abs(axisVal) > 0.1) {
               turnValue = axisVal;
             }
           }
+
+          // Sol Trigger (Yakalama/Tutma)
+          if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
+            leftTriggerPressed = true;
+          }
         }
       }
     }
 
-    // İlerleme Hızı
-    if (isMovingForward) {
-      speed = -0.008;
-    } else if (isMovingBackward) {
-      speed = 0.004;
-    } else {
-      speed = 0;
+    // 2. TUTMA VE FİZİK/YERÇEKİMİ MANTIĞI
+    if (leftController) {
+      leftController.getWorldPosition(leftControllerPos);
+      const distanceToCar = leftControllerPos.distanceTo(carMesh.position);
+
+      // Tutma Koşulu: El arabaya 15 cm yakındayken Sol Trigger'a basılırsa
+      if (leftTriggerPressed && (distanceToCar < 0.15 || isGrabbed)) {
+        isGrabbed = true;
+        carMesh.position.copy(leftControllerPos);
+        verticalVelocity = 0; // Hızı sıfırla
+      } else {
+        isGrabbed = false;
+      }
     }
 
-    // GÜNCELLEME 1: Keskin Direksiyon Açısı (0.03'ten 0.08'e çıkarıldı - Çok daha kıvrak)
-    if (speed !== 0 && Math.abs(turnValue) > 0.1) {
-      const directionMultiplier = speed < 0 ? 1 : -1;
-      carMesh.rotation.y -= turnValue * 0.08 * directionMultiplier;
+    // Yerçekimi Düşüşü
+    if (!isGrabbed && carMesh.position.y > FLOOR_Y) {
+      verticalVelocity += GRAVITY * delta;
+      carMesh.position.y += verticalVelocity * delta;
+
+      // Zemin Seviyesine Çarpma Kontrolü
+      if (carMesh.position.y <= FLOOR_Y) {
+        carMesh.position.y = FLOOR_Y;
+        verticalVelocity = 0;
+      }
     }
 
-    const oldPosition = carMesh.position.clone();
+    // 3. SÜRÜŞ VE DÖNÜŞ FİZİĞİ (Yalnızca araba elinde değilse çalışır)
+    if (!isGrabbed) {
+      if (isMovingForward) {
+        speed = -0.008;
+      } else if (isMovingBackward) {
+        speed = 0.004;
+      } else {
+        speed = 0;
+      }
 
-    // İlerletme
-    carMesh.translateZ(speed);
+      // Keskin Dönüş
+      if (speed !== 0 && Math.abs(turnValue) > 0.1) {
+        const directionMultiplier = speed < 0 ? 1 : -1;
+        carMesh.rotation.y -= turnValue * 0.08 * directionMultiplier;
+      }
 
-    // GÜNCELLEME 2: Gerçek Quest Oda Çizgisi Kontrolü
-    const newPoint = { x: carMesh.position.x, z: carMesh.position.z };
-    if (!isInsideBoundary(newPoint, boundaryPolygon)) {
-      // Eğer araba gerçek odanın çizili sınırının dışına çıkarsa hareketi engelle
-      carMesh.position.copy(oldPosition);
+      carMesh.translateZ(speed);
     }
 
     renderer.render(scene, camera);
