@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Physics & Throw</title>
+  <title>Hot Wheels MR - Full Hand Rotation & Throw</title>
   <style>
     body {
       margin: 0;
@@ -50,7 +50,7 @@
 
   // Fizik ve Fırlatma Değişkenleri
   var isGrabbed = false;
-  var velocity = new THREE.Vector3(0, 0, 0); // Arabanın 3 eksendeki fırlatma hızı (X, Y, Z)
+  var velocity = new THREE.Vector3(0, 0, 0); // Arabanın fırlatma hızı
   var lastControllerPos = new THREE.Vector3(0, 0, 0);
   var GRAVITY = -9.81;
   var FLOOR_Y = 0.0125;
@@ -96,7 +96,7 @@
     var light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
     scene.add(light);
 
-    // Rip Rod Hitbox
+    // Rip Rod Kutu Gövdesi
     var carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
     var carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
@@ -115,10 +115,10 @@
   function render(time, frame) {
     var session = renderer.xr.getSession();
     var delta = (time - lastTime) / 1000;
-    if (delta > 0.1) delta = 0.1; // Ani kare düşüşlerinde fiziğin patlamasını önle
+    if (delta > 0.1) delta = 0.1;
     lastTime = time;
 
-    // Headset Konumunda Doğma
+    // Oyuncu Hizalama
     if (!isSpawnedAtUser && camera) {
       var camPos = new THREE.Vector3();
       camera.getWorldPosition(camPos);
@@ -131,6 +131,7 @@
 
     var leftTriggerPressed = false;
     var leftControllerPos = new THREE.Vector3();
+    var leftControllerQuaternion = new THREE.Quaternion();
 
     if (session && session.inputSources) {
       isMovingForward = false;
@@ -141,7 +142,7 @@
         var source = session.inputSources[i];
         if (!source.gamepad) continue;
 
-        // Sağ Kumanda (Gaz/Fren)
+        // Sağ Kumanda (Gaz / Fren)
         if (source.handedness === 'right') {
           if (source.gamepad.buttons[0] && (source.gamepad.buttons[0].pressed || source.gamepad.buttons[0].value > 0.1)) {
             isMovingForward = true;
@@ -167,38 +168,42 @@
       }
     }
 
-    // TUTMA VE FIRLATMA HIZI HESABI
+    // TUTMA - DÖNDÜRME VE FIRLATMA HESABI
     if (leftController) {
       leftController.getWorldPosition(leftControllerPos);
+      leftController.getWorldQuaternion(leftControllerQuaternion);
+      
       var distanceToCar = leftControllerPos.distanceTo(carMesh.position);
 
-      if (leftTriggerPressed && (distanceToCar < 0.15 || isGrabbed)) {
+      if (leftTriggerPressed && (distanceToCar < 0.20 || isGrabbed)) {
         if (!isGrabbed) {
           isGrabbed = true;
           lastControllerPos.copy(leftControllerPos);
         }
 
-        // Elin anlık hareket vektöründen (hızından) fırlatma kuvveti hesapla
+        // Fırlatma hızı hesabı
         if (delta > 0) {
           velocity.subVectors(leftControllerPos, lastControllerPos).divideScalar(delta);
           lastControllerPos.copy(leftControllerPos);
         }
 
+        // Hem Pozisyonu Hem de Rotasyonu (Açıyı) Kumandaya Birebir Eşitle
         carMesh.position.copy(leftControllerPos);
+        carMesh.quaternion.copy(leftControllerQuaternion);
+
       } else {
-        // Bırakıldığı an fırlatma başlar
         isGrabbed = false;
       }
     }
 
-    // FİZİK DÖNGÜSÜ (Havada Fırlama / Yerde Yuvarlanma)
+    // FİZİK DÖNGÜSÜ
     if (!isGrabbed) {
-      // 1. Havadaysa Yerçekimi Etkisi
+      // 1. Havadaysa Yerçekimi
       if (carMesh.position.y > FLOOR_Y) {
         velocity.y += GRAVITY * delta;
       }
 
-      // Arabayı fırlatma hızı kadar uzaya/ileri taşı
+      // Arabayı fırlatma vektöründe ilerlet
       carMesh.position.x += velocity.x * delta;
       carMesh.position.y += velocity.y * delta;
       carMesh.position.z += velocity.z * delta;
@@ -206,14 +211,18 @@
       // 2. Zemine Çarpma Anı
       if (carMesh.position.y <= FLOOR_Y) {
         carMesh.position.y = FLOOR_Y;
-        velocity.y = 0; // Dikey düşüş durur
+        velocity.y = 0;
 
-        // Yerdeki sürtünme (Fırlatılan arabanın kayıp yavaşlayarak durması)
+        // Yere indiğinde ters/yan durmaması için sadece Y (Yaw) açısını koru, Pitch/Roll açısını sıfırla
+        var euler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
+        carMesh.rotation.set(0, euler.y, 0);
+
+        // Yerdeki sürtünme
         velocity.x *= 0.92;
         velocity.z *= 0.92;
       }
 
-      // 3. Normal Kumanda Sürüşü
+      // 3. Kumanda ile Sürüş
       if (isMovingForward) {
         speed = -0.008;
       } else if (isMovingBackward) {
