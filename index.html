@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Ultra-Precision Grab (1cm Radius)</title>
+  <title>Hot Wheels MR - Precision Grab (3cm Radius)</title>
   <style>
     body {
       margin: 0;
@@ -50,6 +50,8 @@
 
   // Fizik & Tutma Değişkenleri
   var activeGrabber = null; // 'left' veya 'right'
+  var isJustGrabbed = false;
+
   var velocity = new THREE.Vector3(0, 0, 0); 
   var angularVelocity = new THREE.Vector3(0, 0, 0); 
   
@@ -58,7 +60,7 @@
   
   var GRAVITY = -9.81;
   var FLOOR_Y = 0.0125;
-  var GRAB_RADIUS = 0.01; // 1 cm ultratemas mesafesi
+  var GRAB_RADIUS = 0.03; // 3 cm dengeli temas mesafesi
 
   var leftController = null;
   var rightController = null;
@@ -152,18 +154,18 @@
         var source = session.inputSources[i];
         if (!source.gamepad) continue;
 
-        // Sağ Kumanda (Gaz / Fren & Tutma)
+        // Sağ Kumanda
         if (source.handedness === 'right') {
-          if (source.gamepad.buttons[0] && (source.gamepad.buttons[0].pressed || source.gamepad.buttons[0].value > 0.1)) {
-            if (!activeGrabber) isMovingForward = true;
+          if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
             rightTriggerPressed = true;
+            if (!activeGrabber) isMovingForward = true;
           }
-          if (source.gamepad.buttons[1] && (source.gamepad.buttons[1].pressed || source.gamepad.buttons[1].value > 0.1)) {
+          if (source.gamepad.buttons[1] && source.gamepad.buttons[1].value > 0.1) {
             if (!activeGrabber) isMovingBackward = true;
           }
         }
 
-        // Sol Kumanda (Direksiyon & Tutma)
+        // Sol Kumanda
         if (source.handedness === 'left') {
           if (source.gamepad.axes.length >= 2) {
             var axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
@@ -179,9 +181,7 @@
       }
     }
 
-    // İKİ EL İÇİN TUTMA MANTIĞI (1 CM EŞİĞİ)
-    var activeController = null;
-
+    // TUTMA TESPİTİ VE MESAFE KONTROLÜ (3 CM)
     var leftPos = new THREE.Vector3();
     var rightPos = new THREE.Vector3();
 
@@ -191,52 +191,60 @@
     var distLeft = leftPos.distanceTo(carMesh.position);
     var distRight = rightPos.distanceTo(carMesh.position);
 
+    var prevGrabber = activeGrabber;
+
     if (leftTriggerPressed && (distLeft < GRAB_RADIUS || activeGrabber === 'left')) {
       activeGrabber = 'left';
-      activeController = leftController;
     } else if (rightTriggerPressed && (distRight < GRAB_RADIUS || activeGrabber === 'right')) {
       activeGrabber = 'right';
-      activeController = rightController;
     } else {
       activeGrabber = null;
     }
 
-    // Pozisyon & Açısal Takip (Tutma Anı)
-    if (activeController) {
-      var controllerPos = new THREE.Vector3();
-      var controllerQuat = new THREE.Quaternion();
-
-      activeController.getWorldPosition(controllerPos);
-      activeController.getWorldQuaternion(controllerQuat);
-
-      if (delta > 0) {
-        if (lastControllerPos.lengthSq() === 0) {
-          lastControllerPos.copy(controllerPos);
-          lastControllerEuler.setFromQuaternion(controllerQuat, 'XYZ');
-        }
-
-        velocity.subVectors(controllerPos, lastControllerPos).divideScalar(delta);
-        lastControllerPos.copy(controllerPos);
-
-        var currentEuler = new THREE.Euler().setFromQuaternion(controllerQuat, 'XYZ');
-        angularVelocity.set(
-          (currentEuler.x - lastControllerEuler.x) / delta,
-          (currentEuler.y - lastControllerEuler.y) / delta,
-          (currentEuler.z - lastControllerEuler.z) / delta
-        );
-        lastControllerEuler.copy(currentEuler);
-      }
-
-      carMesh.position.copy(controllerPos);
-      carMesh.quaternion.copy(controllerQuat);
-
-    } else {
-      lastControllerPos.set(0, 0, 0);
+    // İlk tutulma anını yakala
+    if (activeGrabber && !prevGrabber) {
+      isJustGrabbed = true;
     }
 
-    // FİZİK VE SERBEST DÜŞÜŞ DÖNGÜSÜ
-    if (!activeGrabber) {
-      // 1. Havadaysa Hareket & Takla
+    // TUTULUYORSA (ARABAYI ELE HİZALA VE HIZ HESAPLA)
+    if (activeGrabber) {
+      var activeController = (activeGrabber === 'left') ? leftController : rightController;
+
+      if (activeController) {
+        var controllerPos = new THREE.Vector3();
+        var controllerQuat = new THREE.Quaternion();
+
+        activeController.getWorldPosition(controllerPos);
+        activeController.getWorldQuaternion(controllerQuat);
+
+        if (isJustGrabbed) {
+          lastControllerPos.copy(controllerPos);
+          lastControllerEuler.setFromQuaternion(controllerQuat, 'XYZ');
+          velocity.set(0, 0, 0);
+          angularVelocity.set(0, 0, 0);
+          isJustGrabbed = false;
+        } else if (delta > 0) {
+          // Çizgisel Hız
+          velocity.subVectors(controllerPos, lastControllerPos).divideScalar(delta);
+          lastControllerPos.copy(controllerPos);
+
+          // Açısal Hız (Takla)
+          var currentEuler = new THREE.Euler().setFromQuaternion(controllerQuat, 'XYZ');
+          angularVelocity.set(
+            (currentEuler.x - lastControllerEuler.x) / delta,
+            (currentEuler.y - lastControllerEuler.y) / delta,
+            (currentEuler.z - lastControllerEuler.z) / delta
+          );
+          lastControllerEuler.copy(currentEuler);
+        }
+
+        carMesh.position.copy(controllerPos);
+        carMesh.quaternion.copy(controllerQuat);
+      }
+    } 
+    // SERBEST DÜŞÜŞ VE FİZİK
+    else {
+      // 1. Havadaysa Yerçekimi ve Dönme
       if (carMesh.position.y > FLOOR_Y) {
         velocity.y += GRAVITY * delta;
 
@@ -260,7 +268,7 @@
         velocity.z *= 0.88;
       }
 
-      // 3. Kumanda ile Sürüş (Sadece araba düzse ve elde değilse)
+      // 3. Kumanda ile Sürüş (Sadece araba düz duruyorsa)
       var upVector = new THREE.Vector3(0, 1, 0);
       upVector.applyQuaternion(carMesh.quaternion);
 
