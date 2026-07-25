@@ -3,22 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR Test</title>
+  <title>Hot Wheels MR - Rip Rod</title>
   <style>
     body {
       margin: 0;
       padding: 0;
-      background-color: #111;
+      overflow: hidden;
+      background-color: #000;
       color: #fff;
       font-family: sans-serif;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      text-align: center;
     }
     #start-btn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
       padding: 20px 40px;
       font-size: 22px;
       font-weight: bold;
@@ -28,69 +27,136 @@
       border-radius: 12px;
       cursor: pointer;
       box-shadow: 0 0 25px #00ffcc;
+      z-index: 9999;
     }
   </style>
+
+  <!-- Three.js Ana Kütüphane (WebGL Sahneleri İçin) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
 
-  <h1>HOT WHEELS MR BAŞLATICI</h1>
-  <p>Aşağıdaki butona basarak Karma Gerçeklik moduna geçebilirsin.</p>
-  <button id="start-btn">KARMA GERÇEKLİĞİ (MR) BAŞLAT</button>
+  <button id="start-btn">HOT WHEELS MR'I BAŞLAT</button>
 
 <script>
-  const button = document.getElementById('start-btn');
+  let scene, camera, renderer;
+  let carMesh;
 
-  // WebXR Kontrolü
-  if (navigator.xr) {
-    navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-      if (!supported) {
-        button.innerText = 'Cihazınız AR/MR Desteklemiyor!';
-        button.style.backgroundColor = '#ff4444';
-      }
-    });
-  } else {
-    button.innerText = 'WebXR Desteği Bulunamadı (HTTPS Gereklidir)';
-    button.style.backgroundColor = '#ff4444';
-  }
+  // Kontrol Durumları
+  let isMovingForward = false;
+  let isMovingBackward = false;
+  let turnValue = 0;
+  let speed = 0;
 
-  button.addEventListener('click', async () => {
-    if (!navigator.xr) return;
+  const startBtn = document.getElementById('start-btn');
+
+  startBtn.addEventListener('click', async () => {
+    if (!navigator.xr) {
+      alert('WebXR desteklenmiyor!');
+      return;
+    }
 
     try {
+      // 1. WebXR Oturumunu Başlat (MR Mode)
       const session = await navigator.xr.requestSession('immersive-ar', {
         optionalFeatures: ['hit-test', 'dom-overlay'],
         domOverlay: { root: document.body }
       });
 
-      button.style.display = 'none';
-
-      const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl', { xrCompatible: true });
-      document.body.appendChild(canvas);
-
-      await session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
-      const refSpace = await session.requestReferenceSpace('local');
-
-      function onXRFrame(time, frame) {
-        session.requestAnimationFrame(onXRFrame);
-        const pose = frame.getViewerPose(refSpace);
-
-        if (pose) {
-          const glLayer = session.renderState.baseLayer;
-          gl.bindFramebuffer(gl.FRAMEBUFFER, glLayer.framebuffer);
-
-          // Ekranı temizle -> Kameraların görünmesini sağlayan şeffaf arka plan
-          gl.clearColor(0.0, 0.0, 0.0, 0.0);
-          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        }
-      }
-
-      session.requestAnimationFrame(onXRFrame);
+      startBtn.style.display = 'none';
+      initThreeJS(session);
 
     } catch (err) {
-      alert('MR Başlatma Hatası: ' + err.message);
+      alert('MR Başlatılamadı: ' + err.message);
     }
   });
+
+  function initThreeJS(session) {
+    // 2. Sahne ve Kamera Setup
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 20);
+
+    // 3. Renderer (Arka Planı Şeffaf / Passthrough)
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
+    renderer.xr.setReferenceSpaceType('local');
+    renderer.xr.setSession(session);
+
+    document.body.appendChild(renderer.domElement);
+
+    // Işık
+    const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
+    scene.add(light);
+
+    // 4. Rip Rod Hitbox (3cm Genişlik, 2.5cm Yükseklik, 7cm Uzunluk)
+    const carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
+    const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 }); // Gri renk
+    carMesh = new THREE.Mesh(carGeometry, carMaterial);
+
+    // Arabayı kullanıcının 1 metre önüne, göz hizasının biraz altına koy
+    carMesh.position.set(0, -0.2, -1);
+    scene.add(carMesh);
+
+    // 5. Oyun Döngüsü
+    renderer.setAnimationLoop(render);
+  }
+
+  function render(time, frame) {
+    const session = renderer.xr.getSession();
+
+    if (session && session.inputSources) {
+      isMovingForward = false;
+      isMovingBackward = false;
+      turnValue = 0;
+
+      for (const source of session.inputSources) {
+        if (!source.gamepad) continue;
+
+        // SAĞ KUMANDA (İleri / Geri)
+        if (source.handedness === 'right') {
+          // Sağ Trigger -> İLERİ (Buttons[0])
+          if (source.gamepad.buttons[0] && source.gamepad.buttons[0].pressed) {
+            isMovingForward = true;
+          }
+          // Sağ Squeeze / Grip -> GERİ (Buttons[1])
+          if (source.gamepad.buttons[1] && source.gamepad.buttons[1].pressed) {
+            isMovingBackward = true;
+          }
+        }
+
+        // SOL KUMANDA (Direksiyon)
+        if (source.handedness === 'left') {
+          // Sol Analog Kol (Axes[2] veya Axes[0] sağa/sola ekseni)
+          if (source.gamepad.axes.length >= 2) {
+            const axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
+            if (Math.abs(axisVal) > 0.1) {
+              turnValue = axisVal;
+            }
+          }
+        }
+      }
+    }
+
+    // Hareket Hızı Hesabı
+    if (isMovingForward) {
+      speed = -0.008; // İleri Hız
+    } else if (isMovingBackward) {
+      speed = 0.004;  // Geri Hız
+    } else {
+      speed = 0;
+    }
+
+    // Direksiyon Döndürme (Sol Analog)
+    if (Math.abs(turnValue) > 0.1) {
+      carMesh.rotation.y -= turnValue * 0.04;
+    }
+
+    // Arabayı Baktığı Yöne İlerletme
+    carMesh.translateZ(speed);
+
+    renderer.render(scene, camera);
+  }
 </script>
 </body>
 </html>
