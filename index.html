@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Physics & Drive</title>
+  <title>Hot Wheels MR</title>
   <style>
     body {
       margin: 0;
@@ -30,8 +30,6 @@
       z-index: 9999;
     }
   </style>
-
-  <!-- Three.js Kütüphanesi -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -39,43 +37,38 @@
   <button id="start-btn">HOT WHEELS MR'I BAŞLAT</button>
 
 <script>
-  let scene, camera, renderer;
-  let carMesh;
+  var scene, camera, renderer;
+  var carMesh;
 
-  // Kontrol Değişkenleri
-  let isMovingForward = false;
-  let isMovingBackward = false;
-  let turnValue = 0;
-  let speed = 0;
+  var isMovingForward = false;
+  var isMovingBackward = false;
+  var turnValue = 0;
+  var speed = 0;
 
-  // Fizik ve Ele Alma Değişkenleri
-  let isGrabbed = false;
-  let verticalVelocity = 0;
-  const GRAVITY = -9.81;
-  const FLOOR_Y = 0.0125; // Arabanın taban yüksekliği (Zemin)
-  let leftController = null;
-  let isSpawnedAtUser = false;
+  var isGrabbed = false;
+  var verticalVelocity = 0;
+  var GRAVITY = -9.81;
+  var FLOOR_Y = 0.0125;
+  var leftController = null;
+  var isSpawnedAtUser = false;
 
-  const startBtn = document.getElementById('start-btn');
+  var startBtn = document.getElementById('start-btn');
 
-  startBtn.addEventListener('click', async () => {
+  startBtn.addEventListener('click', function() {
     if (!navigator.xr) {
       alert('WebXR desteklenmiyor!');
       return;
     }
 
-    try {
-      const session = await navigator.xr.requestSession('immersive-ar', {
-        optionalFeatures: ['hit-test', 'dom-overlay', 'local-floor', 'bounded-floor'],
-        domOverlay: { root: document.body }
-      });
-
+    navigator.xr.requestSession('immersive-ar', {
+      optionalFeatures: ['hit-test', 'dom-overlay', 'local-floor', 'bounded-floor'],
+      domOverlay: { root: document.body }
+    }).then(function(session) {
       startBtn.style.display = 'none';
       initThreeJS(session);
-
-    } catch (err) {
+    }).catch(function(err) {
       alert('MR Başlatılamadı: ' + err.message);
-    }
+    });
   });
 
   function initThreeJS(session) {
@@ -95,79 +88,68 @@
     renderer.xr.setSession(session);
     document.body.appendChild(renderer.domElement);
 
-    // Işık
-    const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
+    var light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
     scene.add(light);
 
-    // Rip Rod Hitbox (3cm x 2.5cm x 7cm)
-    const carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
-    const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
+    var carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
+    var carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
     
-    // Geçici olarak sahneye ekle (İlk karede headset koordinatlarına çekilecek)
     carMesh.position.set(0, FLOOR_Y, -0.5);
     scene.add(carMesh);
 
-    // Kumanda Temsilcileri
     leftController = renderer.xr.getController(0);
     scene.add(leftController);
 
     renderer.setAnimationLoop(render);
   }
 
-  let lastTime = performance.now();
+  var lastTime = performance.now();
 
   function render(time, frame) {
-    const session = renderer.xr.getSession();
-    const delta = (time - lastTime) / 1000;
+    var session = renderer.xr.getSession();
+    var delta = (time - lastTime) / 1000;
     lastTime = time;
 
-    // 1. HEADSET KOORDİNATLARINDA DOĞMA (İmha Bug'ı Çözümü)
     if (!isSpawnedAtUser && camera) {
-      const camPos = new THREE.Vector3();
+      var camPos = new THREE.Vector3();
       camera.getWorldPosition(camPos);
       
-      // Eğer kamera konum almaya başladıysa arabayı doğrudan kullanıcının X ve Z hizasına koy
       if (Math.abs(camPos.x) > 0.001 || Math.abs(camPos.z) > 0.001) {
         carMesh.position.set(camPos.x, FLOOR_Y, camPos.z - 0.4);
         isSpawnedAtUser = true;
       }
     }
 
-    let leftTriggerPressed = false;
-    let leftControllerPos = new THREE.Vector3();
+    var leftTriggerPressed = false;
+    var leftControllerPos = new THREE.Vector3();
 
     if (session && session.inputSources) {
       isMovingForward = false;
       isMovingBackward = false;
       turnValue = 0;
 
-      for (const source of session.inputSources) {
+      for (var i = 0; i < session.inputSources.length; i++) {
+        var source = session.inputSources[i];
         if (!source.gamepad) continue;
 
-        // SAĞ KUMANDA (Gaz / Fren)
         if (source.handedness === 'right') {
-          // Trigger (İleri)
           if (source.gamepad.buttons[0] && (source.gamepad.buttons[0].pressed || source.gamepad.buttons[0].value > 0.1)) {
             isMovingForward = true;
           }
-          // Squeeze/Grip (Geri)
           if (source.gamepad.buttons[1] && (source.gamepad.buttons[1].pressed || source.gamepad.buttons[1].value > 0.1)) {
             isMovingBackward = true;
           }
         }
 
-        // SOL KUMANDA (Direksiyon & Ele Alma)
         if (source.handedness === 'left') {
-          // Direksiyon
           if (source.gamepad.axes.length >= 2) {
-            const axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
+            var axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
             if (Math.abs(axisVal) > 0.1) {
               turnValue = axisVal;
             }
           }
 
-          // Sol Trigger (Yakalama/Tutma)
           if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
             leftTriggerPressed = true;
           }
@@ -175,34 +157,29 @@
       }
     }
 
-    // 2. TUTMA VE FİZİK/YERÇEKİMİ MANTIĞI
     if (leftController) {
       leftController.getWorldPosition(leftControllerPos);
-      const distanceToCar = leftControllerPos.distanceTo(carMesh.position);
+      var distanceToCar = leftControllerPos.distanceTo(carMesh.position);
 
-      // Tutma Koşulu: El arabaya 15 cm yakındayken Sol Trigger'a basılırsa
       if (leftTriggerPressed && (distanceToCar < 0.15 || isGrabbed)) {
         isGrabbed = true;
         carMesh.position.copy(leftControllerPos);
-        verticalVelocity = 0; // Hızı sıfırla
+        verticalVelocity = 0;
       } else {
         isGrabbed = false;
       }
     }
 
-    // Yerçekimi Düşüşü
     if (!isGrabbed && carMesh.position.y > FLOOR_Y) {
       verticalVelocity += GRAVITY * delta;
       carMesh.position.y += verticalVelocity * delta;
 
-      // Zemin Seviyesine Çarpma Kontrolü
       if (carMesh.position.y <= FLOOR_Y) {
         carMesh.position.y = FLOOR_Y;
         verticalVelocity = 0;
       }
     }
 
-    // 3. SÜRÜŞ VE DÖNÜŞ FİZİĞİ (Yalnızca araba elinde değilse çalışır)
     if (!isGrabbed) {
       if (isMovingForward) {
         speed = -0.008;
@@ -212,9 +189,8 @@
         speed = 0;
       }
 
-      // Keskin Dönüş
       if (speed !== 0 && Math.abs(turnValue) > 0.1) {
-        const directionMultiplier = speed < 0 ? 1 : -1;
+        var directionMultiplier = speed < 0 ? 1 : -1;
         carMesh.rotation.y -= turnValue * 0.08 * directionMultiplier;
       }
 
