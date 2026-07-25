@@ -4,32 +4,35 @@
   <meta charset="UTF-8">
   <title>Hot Wheels MR - Tam Kontrol Seti</title>
   <style>
-    body { margin: 0; overflow: hidden; background-color: transparent; }
-    /* VR/AR Butonunu ekranın altında belirgin yapalım */
-    #VRButton {
+    body { margin: 0; overflow: hidden; background-color: #000; }
+    
+    /* Quest 3 ekranında kesin olarak görünecek özel MR Butonu */
+    #start-mr-btn {
       position: absolute;
-      bottom: 20px;
+      bottom: 30px;
       left: 50%;
       transform: translateX(-50%);
-      padding: 12px 24px;
-      border: 1px solid #fff;
-      border-radius: 4px;
-      background: rgba(0,0,0,0.8);
-      color: #fff;
+      padding: 16px 32px;
+      border: 2px solid #00ffcc;
+      border-radius: 8px;
+      background: #111;
+      color: #00ffcc;
       font-family: sans-serif;
-      font-size: 13px;
+      font-size: 18px;
       font-weight: bold;
-      text-align: center;
-      z-index: 999;
+      cursor: pointer;
+      z-index: 99999;
+      box-shadow: 0 0 15px rgba(0,255,204,0.5);
     }
   </style>
 
   <!-- Three.js Ana Kütüphanesi -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <!-- Three.js VR Button Eklentisi (Doğrudan yüklüyoruz) -->
-  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/vr/VRButton.js"></script>
 </head>
 <body>
+
+  <!-- Özel AR Başlatma Butonu -->
+  <button id="start-mr-btn">KARMA GERÇEKLİĞİ (MR) BAŞLAT</button>
 
 <script type="module">
   import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.19.0/dist/cannon-es.js';
@@ -40,7 +43,7 @@
   // Hareket Durumları
   let isMovingForward = false;
   let isMovingBackward = false;
-  let turnValue = 0; // Sol kumandadan gelen sağ/sol değeri
+  let turnValue = 0;
 
   init();
   animate();
@@ -52,49 +55,65 @@
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 20);
 
-    // Alpha: true ile Meta Quest 3 Passthrough kamerasını aktif ediyoruz
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.xr.enabled = true;
+    renderer.xr.enabled = true; // WebXR Etkin
     document.body.appendChild(renderer.domElement);
-
-    // VR/AR Başlatma Butonunu Ekranın Altına Ekle
-    document.body.appendChild(VRButton.createButton(renderer));
 
     const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
     scene.add(light);
 
     // ==========================================
-    // 2. CANNON.ES FİZİK DÜNYASI
+    // 2. ÖZEL WEBXR / PASSTHROUGH (MR) MANUEL BAŞLATICI
+    // ==========================================
+    const mrButton = document.getElementById('start-mr-btn');
+    
+    mrButton.addEventListener('click', async () => {
+      if (navigator.xr) {
+        try {
+          // Quest 3 kamerasını (Passthrough) ve Kontrolcüleri zorla başlatıyoruz
+          const session = await navigator.xr.requestSession('immersive-ar', {
+            optionalFeatures: ['hit-test', 'dom-overlay'],
+            domOverlay: { root: document.body }
+          });
+          
+          renderer.xr.setSession(session);
+          mrButton.style.display = 'none'; // Derinliğe girince butonu gizle
+        } catch (e) {
+          alert('WebXR Başlatılamadı! Lütfen HTTPS kullandığından emin ol. Hata: ' + e.message);
+        }
+      } else {
+        alert('Cihazında WebXR desteği bulunamadı!');
+      }
+    });
+
+    // ==========================================
+    // 3. CANNON.ES FİZİK DÜNYASI
     // ==========================================
     world = new CANNON.World();
     world.gravity.set(0, -9.82, 0);
 
     // ==========================================
-    // 3. RIP ROD ÖLÇÜLERİNDE GRİ KUTU (HITBOX)
+    // 4. RIP ROD ÖLÇÜLERİNDE GRİ KUTU (HITBOX)
     // ==========================================
     const carWidth = 0.03;   // 3 cm
     const carHeight = 0.025; // 2.5 cm
     const carLength = 0.07;  // 7 cm
 
-    // Fizik Gövdesi (35 gram kütle)
     const carShape = new CANNON.Box(new CANNON.Vec3(carWidth / 2, carHeight / 2, carLength / 2));
-    carBody = new CANNON.Body({ mass: 0.035 });
+    carBody = new CANNON.Body({ mass: 0.035 }); // 35 gram
     carBody.addShape(carShape);
-    carBody.position.set(0, 1, -1); // Odanın ortasında 1m yüksekte başlar
-    
-    // Fırıldak gibi kendi etrafında dönmemesi için açısal direnç
+    carBody.position.set(0, 1, -1); // 1 metre ilerde havada durur
     carBody.angularDamping = 0.6; 
     world.addBody(carBody);
 
-    // Görsel Gri Hitbox
     const carGeometry = new THREE.BoxGeometry(carWidth, carHeight, carLength);
-    const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 }); // Gri Mat
+    const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 }); // Gri Hitbox
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
     scene.add(carMesh);
 
     // ==========================================
-    // 4. KONTROLCÜ TANIMLAMALARI (SAĞ VE SOL)
+    // 5. KONTROLCÜ TANIMLAMALARI (SAĞ VE SOL)
     // ==========================================
     const controller0 = renderer.xr.getController(0);
     const controller1 = renderer.xr.getController(1);
@@ -102,9 +121,8 @@
     scene.add(controller0);
     scene.add(controller1);
 
-    // Kumanda Olay Dinleyicileri (Event Listeners)
     function setupControllerEvents(controller) {
-      // Sağ Kumanda Trigger (Tetik) -> İLERİ
+      // Sağ Trigger -> İLERİ
       controller.addEventListener('selectstart', (e) => {
         if (getHandedness(e.target) === 'right') isMovingForward = true;
       });
@@ -112,7 +130,7 @@
         if (getHandedness(e.target) === 'right') isMovingForward = false;
       });
 
-      // Sağ Kumanda Squeeze (Sıkma/Grip) -> GERİ
+      // Sağ Grip/Squeeze -> GERİ
       controller.addEventListener('squeezestart', (e) => {
         if (getHandedness(e.target) === 'right') isMovingBackward = true;
       });
@@ -125,7 +143,6 @@
     setupControllerEvents(controller1);
   }
 
-  // Kumandanın Sağ mı Sol mu olduğunu tespit eden fonksiyon
   function getHandedness(controllerTarget) {
     const session = renderer.xr.getSession();
     if (session && session.inputSources) {
@@ -139,7 +156,7 @@
   }
 
   // ==========================================
-  // 5. OYUN DÖNGÜSÜ
+  // 6. OYUN VE FİZİK DÖNGÜSÜ
   // ==========================================
   function animate() {
     renderer.setAnimationLoop(render);
@@ -148,20 +165,19 @@
   function render() {
     world.step(1 / 60);
 
-    // --- SOL KUMANDA ANALOG KOL (THUMBSTICK) SAĞ / SOL DİREKSİYON ---
+    // SOL KUMANDA ANALOG KOL (THUMBSTICK) -> DİREKSİYON
     const session = renderer.xr.getSession();
     turnValue = 0;
 
     if (session && session.inputSources) {
       for (const source of session.inputSources) {
         if (source.handedness === 'left' && source.gamepad) {
-          // Sol Analog kolun X ekseni
           turnValue = source.gamepad.axes[2] || source.gamepad.axes[0] || 0;
         }
       }
     }
 
-    // --- İLERİ / GERİ HAREKET (SAĞ KUMANDA) ---
+    // İLERİ / GERİ HAREKET (SAĞ KUMANDA)
     if (isMovingForward) {
       const localForward = new CANNON.Vec3(0, 0, -0.08);
       const worldForward = carBody.quaternion.vmult(localForward);
@@ -173,13 +189,12 @@
       carBody.applyForce(worldBackward, carBody.position);
     }
 
-    // --- SAĞA / SOLA DÖNÜŞ (SOL KUMANDA) ---
-    if (Math.abs(turnValue) > 0.1) { // Deadzone (Hassasiyet eşiği)
+    // SAĞA / SOLA DÖNÜŞ (SOL KUMANDA)
+    if (Math.abs(turnValue) > 0.1) {
       const turnSpeed = -3.0;
       carBody.angularVelocity.y = turnValue * turnSpeed;
     }
 
-    // Görsel kutuyu fiziksel kutunun pozisyonuna senkronize et
     carMesh.position.copy(carBody.position);
     carMesh.quaternion.copy(carBody.quaternion);
 
