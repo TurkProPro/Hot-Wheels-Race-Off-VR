@@ -12,79 +12,72 @@
       background-color: #000;
     }
   </style>
-
-  <!-- Three.js ve VRButton Kütüphaneleri -->
+  <!-- Sadece Tam Uyumlu Three.js ve VRButton -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/vr/VRButton.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/cannon-es@0.19.0/dist/cannon-es.js"></script>
 </head>
 <body>
 
 <script>
-  let scene, camera, renderer, world;
-  let carBody, carMesh;
+  let scene, camera, renderer;
+  let carMesh;
 
   let isMovingForward = false;
   let isMovingBackward = false;
   let turnValue = 0;
+  let speed = 0;
 
   init();
   animate();
 
   function init() {
-    // 1. Sahne ve Kamera Kurulumu
+    // 1. Sahne ve Kamera
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 20);
 
-    // 2. Renderer ve WebXR Etkinleştirme
+    // 2. WebGL Renderer ve WebXR Etkinleştirme
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
     document.body.appendChild(renderer.domElement);
 
-    // 3. VR/AR Butonunu Ekrana Ekle (Three.js Standart Butonu)
+    // 3. VR / AR Butonunu Doğrudan Gömmek
     document.body.appendChild(VRButton.createButton(renderer));
 
-    // Işık
+    // Işıklandırma
     const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
     scene.add(light);
 
-    // 4. CANNON Fizik Dünyası
-    world = new CANNON.World();
-    world.gravity.set(0, -9.82, 0);
-
-    // 5. Rip Rod Hitbox (3cm x 2.5cm x 7cm)
-    const carWidth = 0.03;
-    const carHeight = 0.025;
-    const carLength = 0.07;
-
-    const carShape = new CANNON.Box(new CANNON.Vec3(carWidth / 2, carHeight / 2, carLength / 2));
-    carBody = new CANNON.Body({ mass: 0.035 });
-    carBody.addShape(carShape);
-    carBody.position.set(0, 1, -1);
-    carBody.angularDamping = 0.6;
-    world.addBody(carBody);
-
-    const carGeometry = new THREE.BoxGeometry(carWidth, carHeight, carLength);
+    // 4. Rip Rod Hitbox (3cm x 2.5cm x 7cm Gri Kutu)
+    const carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
     const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
+    
+    // Arabayı başlangıçta 1 metre ileriye yerleştir
+    carMesh.position.set(0, 0, -1);
     scene.add(carMesh);
 
-    // 6. Kontrolcüler
+    // 5. Kontrolcüler (Sağ ve Sol Kumanda)
     const controller0 = renderer.xr.getController(0);
     const controller1 = renderer.xr.getController(1);
     scene.add(controller0);
     scene.add(controller1);
 
-    controller0.addEventListener('selectstart', () => { isMovingForward = true; });
-    controller0.addEventListener('selectend', () => { isMovingForward = false; });
-    controller0.addEventListener('squeezestart', () => { isMovingBackward = true; });
-    controller0.addEventListener('squeezeend', () => { isMovingBackward = false; });
+    // İleri / Geri Tetik Olayları
+    const onSelectStart = () => { isMovingForward = true; };
+    const onSelectEnd = () => { isMovingForward = false; };
+    const onSqueezeStart = () => { isMovingBackward = true; };
+    const onSqueezeEnd = () => { isMovingBackward = false; };
 
-    controller1.addEventListener('selectstart', () => { isMovingForward = true; });
-    controller1.addEventListener('selectend', () => { isMovingForward = false; });
-    controller1.addEventListener('squeezestart', () => { isMovingBackward = true; });
-    controller1.addEventListener('squeezeend', () => { isMovingBackward = false; });
+    controller0.addEventListener('selectstart', onSelectStart);
+    controller0.addEventListener('selectend', onSelectEnd);
+    controller0.addEventListener('squeezestart', onSqueezeStart);
+    controller0.addEventListener('squeezeend', onSqueezeEnd);
+
+    controller1.addEventListener('selectstart', onSelectStart);
+    controller1.addEventListener('selectend', onSelectEnd);
+    controller1.addEventListener('squeezestart', onSqueezeStart);
+    controller1.addEventListener('squeezeend', onSqueezeEnd);
   }
 
   function animate() {
@@ -92,14 +85,13 @@
   }
 
   function render() {
-    world.step(1 / 60);
-
     const session = renderer.xr.getSession();
     turnValue = 0;
 
     if (session && session.inputSources) {
       for (const source of session.inputSources) {
         if (source.gamepad && source.gamepad.axes.length >= 2) {
+          // Sol analog kol hassasiyeti
           if (Math.abs(source.gamepad.axes[0]) > 0.1) {
             turnValue = source.gamepad.axes[0];
           }
@@ -107,23 +99,22 @@
       }
     }
 
+    // İlerleme Hızı Hesaplama
     if (isMovingForward) {
-      const localForward = new CANNON.Vec3(0, 0, -0.08);
-      const worldForward = carBody.quaternion.vmult(localForward);
-      carBody.applyForce(worldForward, carBody.position);
-    }
-    if (isMovingBackward) {
-      const localBackward = new CANNON.Vec3(0, 0, 0.04);
-      const worldBackward = carBody.quaternion.vmult(localBackward);
-      carBody.applyForce(worldBackward, carBody.position);
+      speed = -0.01;
+    } else if (isMovingBackward) {
+      speed = 0.005;
+    } else {
+      speed = 0;
     }
 
+    // Direksiyon Dönüşü
     if (Math.abs(turnValue) > 0.1) {
-      carBody.angularVelocity.y = turnValue * -3.0;
+      carMesh.rotation.y -= turnValue * 0.05;
     }
 
-    carMesh.position.copy(carBody.position);
-    carMesh.quaternion.copy(carBody.quaternion);
+    // Arabayı Baktığı Yöne Doğru İlerletme
+    carMesh.translateZ(speed);
 
     renderer.render(scene, camera);
   }
