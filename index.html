@@ -42,14 +42,14 @@
   let scene, camera, renderer;
   let carMesh;
 
-  // Kontrol ve Fizik Değişkenleri
+  // Kontrol Değişkenleri
   let isMovingForward = false;
   let isMovingBackward = false;
   let turnValue = 0;
   let speed = 0;
 
-  // Boundary (Oda Sınırı) Yarıçapı (Metre cinsinden)
-  const BOUNDARY_RADIUS = 2.0; 
+  // Quest'in Gerçek Oda Sınır Noktaları (Boundary Geometry)
+  let boundaryPolygon = [];
 
   const startBtn = document.getElementById('start-btn');
 
@@ -60,9 +60,9 @@
     }
 
     try {
-      // 'local-floor' ile Quest 3'ün kendi ayarladığı fiziksel zemin seviyesini istiyoruz
+      // 'bounded-floor' ile Quest'in çizili sınır haritasını istiyoruz
       const session = await navigator.xr.requestSession('immersive-ar', {
-        optionalFeatures: ['hit-test', 'dom-overlay', 'local-floor'],
+        optionalFeatures: ['hit-test', 'dom-overlay', 'bounded-floor', 'local-floor'],
         domOverlay: { root: document.body }
       });
 
@@ -74,7 +74,7 @@
     }
   });
 
-  function initThreeJS(session) {
+  async function initThreeJS(session) {
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 20);
 
@@ -82,11 +82,22 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
     
-    // Referans noktasını doğrudan Fiziksel Zemin yapıyoruz (Boy ne olursa olsun araba zemine oturur)
-    renderer.xr.setReferenceSpaceType('local-floor');
-    renderer.xr.setSession(session);
+    // Öncelik Quest'in çizili sınırında (bounded-floor)
+    try {
+      renderer.xr.setReferenceSpaceType('bounded-floor');
+    } catch(e) {
+      renderer.xr.setReferenceSpaceType('local-floor');
+    }
 
+    renderer.xr.setSession(session);
     document.body.appendChild(renderer.domElement);
+
+    // Quest Oda Sınır Geometrisini Çekme
+    session.requestReferenceSpace('bounded-floor').then((refSpace) => {
+      if (refSpace.boundsGeometry) {
+        boundaryPolygon = Array.from(refSpace.boundsGeometry).map(pt => ({ x: pt.x, z: pt.z }));
+      }
+    }).catch(() => {});
 
     // Işık
     const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
@@ -97,11 +108,25 @@
     const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
 
-    // Y yüksekliği 0 = Tam fiziksel zemin seviyesi. Arabanın alt yüzeyinin yere tam oturması için Y = 0.0125 yapıyoruz.
+    // Arabayı tam zemine oturt
     carMesh.position.set(0, 0.0125, -1.0);
     scene.add(carMesh);
 
     renderer.setAnimationLoop(render);
+  }
+
+  // Nokta Poligonun İçinde mi Kontrolü (Ray-Casting Algoritması)
+  function isInsideBoundary(point, polygon) {
+    if (!polygon || polygon.length < 3) return true; // Sınır çekilemediyse serbest bırak
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, zi = polygon[i].z;
+      const xj = polygon[j].x, zj = polygon[j].z;
+      const intersect = ((zi > point.z) !== (zj > point.z)) &&
+          (point.x < (xj - xi) * (point.z - zi) / (zj - zi) + xi);
+      if (intersect) inside = !inside;
+    }
+    return inside;
   }
 
   function render(time, frame) {
@@ -117,11 +142,9 @@
 
         // SAĞ KUMANDA (İleri / Geri)
         if (source.handedness === 'right') {
-          // Sağ Trigger -> İLERİ (Buttons[0])
           if (source.gamepad.buttons[0] && source.gamepad.buttons[0].pressed) {
             isMovingForward = true;
           }
-          // Sağ Squeeze / Grip -> GERİ (Buttons[1])
           if (source.gamepad.buttons[1] && source.gamepad.buttons[1].pressed) {
             isMovingBackward = true;
           }
@@ -129,7 +152,6 @@
 
         // SOL KUMANDA (Direksiyon)
         if (source.handedness === 'left') {
-          // Sol Analog Kol (Axes[2] veya Axes[0] sağa/sola ekseni)
           if (source.gamepad.axes.length >= 2) {
             const axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
             if (Math.abs(axisVal) > 0.1) {
@@ -140,32 +162,30 @@
       }
     }
 
-    // İlerleme Hızı Hesaplama
+    // İlerleme Hızı
     if (isMovingForward) {
-      speed = -0.008; // İleri
+      speed = -0.008;
     } else if (isMovingBackward) {
-      speed = 0.004;  // Geri
+      speed = 0.004;
     } else {
       speed = 0;
     }
 
-    // Gerçekçi Araç Fiziği: Sadece araba hareket ederken dönüş yapabilme
+    // GÜNCELLEME 1: Keskin Direksiyon Açısı (0.03'ten 0.08'e çıkarıldı - Çok daha kıvrak)
     if (speed !== 0 && Math.abs(turnValue) > 0.1) {
       const directionMultiplier = speed < 0 ? 1 : -1;
-      carMesh.rotation.y -= turnValue * 0.03 * directionMultiplier;
+      carMesh.rotation.y -= turnValue * 0.08 * directionMultiplier;
     }
 
-    // Arabanın mevcut pozisyonunu sakla (Boundary sınırını geçerse geri almak için)
     const oldPosition = carMesh.position.clone();
 
-    // Arabayı Baktığı Yöne Doğru İlerletme
+    // İlerletme
     carMesh.translateZ(speed);
 
-    // Boundary (Oda Sınırı) Kontrolü (X ve Z ekseninde mesafe hesabı)
-    const horizontalDistance = Math.sqrt(carMesh.position.x ** 2 + carMesh.position.z ** 2);
-
-    // Sınırın dışına çıkarsa arabayı eski pozisyonunda tut
-    if (horizontalDistance > BOUNDARY_RADIUS) {
+    // GÜNCELLEME 2: Gerçek Quest Oda Çizgisi Kontrolü
+    const newPoint = { x: carMesh.position.x, z: carMesh.position.z };
+    if (!isInsideBoundary(newPoint, boundaryPolygon)) {
+      // Eğer araba gerçek odanın çizili sınırının dışına çıkarsa hareketi engelle
       carMesh.position.copy(oldPosition);
     }
 
