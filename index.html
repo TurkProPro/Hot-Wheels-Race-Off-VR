@@ -31,7 +31,7 @@
     }
   </style>
 
-  <!-- Three.js Ana Kütüphane (WebGL Sahneleri İçin) -->
+  <!-- Three.js Kütüphanesi -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
@@ -42,11 +42,14 @@
   let scene, camera, renderer;
   let carMesh;
 
-  // Kontrol Durumları
+  // Kontrol ve Fizik Değişkenleri
   let isMovingForward = false;
   let isMovingBackward = false;
   let turnValue = 0;
   let speed = 0;
+
+  // Boundary (Oda Sınırı) Yarıçapı (Metre cinsinden)
+  const BOUNDARY_RADIUS = 2.0; 
 
   const startBtn = document.getElementById('start-btn');
 
@@ -57,9 +60,9 @@
     }
 
     try {
-      // 1. WebXR Oturumunu Başlat (MR Mode)
+      // 'local-floor' ile Quest 3'ün kendi ayarladığı fiziksel zemin seviyesini istiyoruz
       const session = await navigator.xr.requestSession('immersive-ar', {
-        optionalFeatures: ['hit-test', 'dom-overlay'],
+        optionalFeatures: ['hit-test', 'dom-overlay', 'local-floor'],
         domOverlay: { root: document.body }
       });
 
@@ -72,15 +75,15 @@
   });
 
   function initThreeJS(session) {
-    // 2. Sahne ve Kamera Setup
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 20);
 
-    // 3. Renderer (Arka Planı Şeffaf / Passthrough)
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
-    renderer.xr.setReferenceSpaceType('local');
+    
+    // Referans noktasını doğrudan Fiziksel Zemin yapıyoruz (Boy ne olursa olsun araba zemine oturur)
+    renderer.xr.setReferenceSpaceType('local-floor');
     renderer.xr.setSession(session);
 
     document.body.appendChild(renderer.domElement);
@@ -89,16 +92,15 @@
     const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
     scene.add(light);
 
-    // 4. Rip Rod Hitbox (3cm Genişlik, 2.5cm Yükseklik, 7cm Uzunluk)
+    // Rip Rod Hitbox (3cm x 2.5cm x 7cm)
     const carGeometry = new THREE.BoxGeometry(0.03, 0.025, 0.07);
-    const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 }); // Gri renk
+    const carMaterial = new THREE.MeshStandardMaterial({ color: 0x808080 });
     carMesh = new THREE.Mesh(carGeometry, carMaterial);
 
-    // Arabayı kullanıcının 1 metre önüne, göz hizasının biraz altına koy
-    carMesh.position.set(0, -0.2, -1);
+    // Y yüksekliği 0 = Tam fiziksel zemin seviyesi. Arabanın alt yüzeyinin yere tam oturması için Y = 0.0125 yapıyoruz.
+    carMesh.position.set(0, 0.0125, -1.0);
     scene.add(carMesh);
 
-    // 5. Oyun Döngüsü
     renderer.setAnimationLoop(render);
   }
 
@@ -138,22 +140,34 @@
       }
     }
 
-    // Hareket Hızı Hesabı
+    // İlerleme Hızı Hesaplama
     if (isMovingForward) {
-      speed = -0.008; // İleri Hız
+      speed = -0.008; // İleri
     } else if (isMovingBackward) {
-      speed = 0.004;  // Geri Hız
+      speed = 0.004;  // Geri
     } else {
       speed = 0;
     }
 
-    // Direksiyon Döndürme (Sol Analog)
-    if (Math.abs(turnValue) > 0.1) {
-      carMesh.rotation.y -= turnValue * 0.04;
+    // Gerçekçi Araç Fiziği: Sadece araba hareket ederken dönüş yapabilme
+    if (speed !== 0 && Math.abs(turnValue) > 0.1) {
+      const directionMultiplier = speed < 0 ? 1 : -1;
+      carMesh.rotation.y -= turnValue * 0.03 * directionMultiplier;
     }
 
-    // Arabayı Baktığı Yöne İlerletme
+    // Arabanın mevcut pozisyonunu sakla (Boundary sınırını geçerse geri almak için)
+    const oldPosition = carMesh.position.clone();
+
+    // Arabayı Baktığı Yöne Doğru İlerletme
     carMesh.translateZ(speed);
+
+    // Boundary (Oda Sınırı) Kontrolü (X ve Z ekseninde mesafe hesabı)
+    const horizontalDistance = Math.sqrt(carMesh.position.x ** 2 + carMesh.position.z ** 2);
+
+    // Sınırın dışına çıkarsa arabayı eski pozisyonunda tut
+    if (horizontalDistance > BOUNDARY_RADIUS) {
+      carMesh.position.copy(oldPosition);
+    }
 
     renderer.render(scene, camera);
   }
