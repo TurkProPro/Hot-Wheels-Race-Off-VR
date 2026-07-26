@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb (Fix Axis & Scale)</title>
+  <title>Hot Wheels MR - Acceleracers Reverb (Realistic Physics)</title>
   <style>
     body {
       margin: 0;
@@ -52,7 +52,7 @@
 
 <script>
   var scene, camera, renderer;
-  var carMesh; // Fizik ve tutma kapsayıcısı (Hitbox)
+  var carMesh; 
 
   // Kontrol Değişkenleri
   var isMovingForward = false;
@@ -61,7 +61,7 @@
   var speed = 0;
 
   // Fizik & Tutma Değişkenleri
-  var activeGrabber = null; // 'left' veya 'right'
+  var activeGrabber = null; 
   var isJustGrabbed = false;
 
   var velocity = new THREE.Vector3(0, 0, 0); 
@@ -71,8 +71,8 @@
   var lastControllerEuler = new THREE.Euler(0, 0, 0);
   
   var GRAVITY = -9.81;
-  var FLOOR_Y = 0.008; // Otomatik boyutlandırmaya göre taban payı
-  var GRAB_RADIUS = 0.05; // 5 cm tutma mesafesi
+  var FLOOR_Y = 0.008; 
+  var GRAB_RADIUS = 0.05; 
 
   var leftController = null;
   var rightController = null;
@@ -123,7 +123,7 @@
     dirLight.position.set(1, 3, 2);
     scene.add(dirLight);
 
-    // Birebir Hot Wheels Ebatında Hitbox Kutu (Genişlik: 3cm, Yükseklik: 2cm, Uzunluk: 7cm)
+    // Hitbox Kutu
     var hitboxGeometry = new THREE.BoxGeometry(0.03, 0.02, 0.07);
     var hitboxMaterial = new THREE.MeshBasicMaterial({ visible: false });
     carMesh = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
@@ -137,23 +137,20 @@
     loader.load('car_model.glb', function(gltf) {
       var reverbModel = gltf.scene;
 
-      // 1. EKSEN DÜZELTME (Araba yana gidiyorsa model yönünü 90 derece döndür)
-      reverbModel.rotation.y = Math.PI / 2; // Eğer araba tam tersi yöne giderse -Math.PI / 2 yapabilirsin.
+      // Eksen hizalama
+      reverbModel.rotation.y = Math.PI / 2;
 
-      // 2. OTOMATİK HOT WHEELS BOYUTLANDIRMASI (Tam 7 cm uzunluk)
+      // Boyutlandırma (Hot Wheels: 7cm)
       var bboxInitial = new THREE.Box3().setFromObject(reverbModel);
       var currentLength = bboxInitial.max.z - bboxInitial.min.z;
-      
-      // Eğer Z ekseni yerine X ekseni uzunsa onu baz al
       if ((bboxInitial.max.x - bboxInitial.min.x) > currentLength) {
         currentLength = bboxInitial.max.x - bboxInitial.min.x;
       }
 
-      var targetLength = 0.07; // 7 cm (Gerçek Hot Wheels Ölçeği)
+      var targetLength = 0.07; 
       var targetScale = targetLength / currentLength;
       reverbModel.scale.set(targetScale, targetScale, targetScale);
 
-      // Gölgeler
       reverbModel.traverse(function(child) {
         if (child.isMesh) {
           child.castShadow = true;
@@ -161,7 +158,6 @@
         }
       });
 
-      // Tabanı Zeminle Sıfırla
       var bboxFinal = new THREE.Box3().setFromObject(reverbModel);
       reverbModel.position.y = -bboxFinal.min.y - 0.01; 
 
@@ -230,13 +226,12 @@
           }
         }
 
-        // Sol Kumanda (Direksiyon Kontrol Düzeltmesi)
+        // Sol Kumanda (Kesintisiz Direksiyon)
         if (source.handedness === 'left') {
           var axes = source.gamepad.axes;
           if (axes && axes.length > 0) {
-            // Quest ve diğer headset'lerde X eksenini tara (0 veya 2. indekstir)
             var axisX = axes.length >= 4 ? axes[2] : axes[0];
-            if (Math.abs(axisX) > 0.05) { // Hassasiyet eşiği artırıldı
+            if (Math.abs(axisX) > 0.05) {
               turnValue = axisX;
             }
           }
@@ -272,7 +267,7 @@
       isJustGrabbed = true;
     }
 
-    // TUTULUYORSA
+    // ELDE TUTULUYORSA
     if (activeGrabber) {
       var activeController = (activeGrabber === 'left') ? leftController : rightController;
 
@@ -306,11 +301,13 @@
         carMesh.quaternion.copy(controllerQuat);
       }
     } 
-    // SERBEST DÜŞÜŞ VE SÜRÜŞ FİZİĞİ
+    // HAVADA VEYA ZEMİNDE FİZİK DÖNGÜSÜ
     else {
+      // 1. HAVADAYSA (Serbest Düşüş ve Takla)
       if (carMesh.position.y > FLOOR_Y) {
         velocity.y += GRAVITY * delta;
 
+        // Havada serbest takla ve dönme açısı
         carMesh.rotation.x += angularVelocity.x * delta;
         carMesh.rotation.y += angularVelocity.y * delta;
         carMesh.rotation.z += angularVelocity.z * delta;
@@ -320,28 +317,42 @@
       carMesh.position.y += velocity.y * delta;
       carMesh.position.z += velocity.z * delta;
 
+      // 2. ZEMİNE ÇARPMA ANI (En Yakın Düzleme Devrilme Mantığı)
       if (carMesh.position.y <= FLOOR_Y) {
         carMesh.position.y = FLOOR_Y;
         velocity.y = 0;
 
-        angularVelocity.multiplyScalar(0.1);
+        angularVelocity.multiplyScalar(0.05);
 
+        // Arabanın "Yukarı" Vektörünü Hesapla
+        var upVector = new THREE.Vector3(0, 1, 0);
+        upVector.applyQuaternion(carMesh.quaternion);
+
+        // Hedef Yatay Açı (Zemin Düzlemi)
+        var targetRoll = 0; // Tavanı yukarı bakan normal durum
+        if (upVector.y < 0) {
+          targetRoll = Math.PI; // Ters çakıldıysa baş aşağı ters durur
+        }
+
+        // Açıyı en yakın yatay düzleme (Düz veya Ters) yumuşakça yatır
         var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
-        currentEuler.x = THREE.MathUtils.lerp(currentEuler.x, 0, 0.15);
-        currentEuler.z = THREE.MathUtils.lerp(currentEuler.z, 0, 0.15);
+        currentEuler.x = THREE.MathUtils.lerp(currentEuler.x, 0, 0.2);
+        currentEuler.z = THREE.MathUtils.lerp(currentEuler.z, targetRoll, 0.2);
 
         carMesh.quaternion.setFromEuler(currentEuler);
 
-        velocity.x *= 0.85;
-        velocity.z *= 0.85;
+        velocity.x *= 0.8;
+        velocity.z *= 0.8;
       }
 
+      // 3. SÜRÜŞ KONTROLÜ (DÜZ VEYA TERS SÜRÜŞ)
       var upVector = new THREE.Vector3(0, 1, 0);
       upVector.applyQuaternion(carMesh.quaternion);
 
-      var isUpright = upVector.y > 0.7;
+      // Yere temas ediyor mu ve tekerlekleri zemin izinde mi? (Düz veya Tam Ters Durumda)
+      var isStableOnGround = Math.abs(upVector.y) > 0.65;
 
-      if (carMesh.position.y <= FLOOR_Y + 0.005 && isUpright) {
+      if (carMesh.position.y <= FLOOR_Y + 0.005 && isStableOnGround) {
         if (isMovingForward) {
           speed = -0.006;
         } else if (isMovingBackward) {
@@ -350,10 +361,17 @@
           speed = 0;
         }
 
-        // DİREKSİYON DÖNÜŞ DÜZELTMESİ
+        // DİREKSİYON (Sonsuz Dairesel Dönüş Düzeltmesi)
         if (speed !== 0 && Math.abs(turnValue) > 0.05) {
           var directionMultiplier = speed < 0 ? 1 : -1;
-          carMesh.rotation.y -= turnValue * 0.06 * directionMultiplier;
+          
+          // Eğer araba TERS devrildiyse direksiyon yönü tersine döner
+          if (upVector.y < 0) {
+            directionMultiplier *= -1;
+          }
+
+          // Kilitlenme olmadan Y ekseninde bağımsız rotasyon birikimi
+          carMesh.rotateY(-turnValue * 0.06 * directionMultiplier);
         }
 
         carMesh.translateZ(speed);
