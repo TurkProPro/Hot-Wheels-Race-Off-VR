@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Physics & Ramp Fix</title>
+  <title>Hot Wheels MR - Overhead Hitbox Fix</title>
   <style>
     body {
       margin: 0;
@@ -58,7 +58,7 @@
   var MAX_SPEED_FORWARD = -0.015; 
   var MAX_SPEED_BACKWARD = 0.008;  
   var ACCEL = 0.00035;             
-  var FRICTION = 0.98; // Yumuşak yavaşlama için sürtünme artırıldı          
+  var FRICTION = 0.98;            
   var BRAKE_FORCE = 0.90;         
 
   var isThrottlePressed = false;
@@ -1010,23 +1010,24 @@
 
       var effectiveFloorY = FLOOR_Y;
 
-      // --- EĞİMLİ / RAMPA HITBOX VE PÜRÜZSÜZ ÇARPIŞMA FİZİĞİ ---
+      // --- HITBOX MÜDAHALESİ VE YUKARI IŞINLANMAYI ENGELLEME FİZİĞİ ---
       if (hitboxVisuals.length > 0) {
-        // 1. ZEMİN & RAMPA TESPİTİ (Işın ile Yüzey Çakışması)
+        // 1. ZEMİN TESPİTİ (Sadece arabanın yakın altındaki yüzeyler algılanır)
         var rayOrigin = carMesh.position.clone();
-        rayOrigin.y += 0.10; 
+        rayOrigin.y += 0.02; // Işınlama mesafesini düşürmek için arabanın hemen üstünden başlatıyoruz
         downRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
 
         var intersects = downRaycaster.intersectObjects(hitboxVisuals, true);
         if (intersects.length > 0) {
           var topHit = intersects[0];
-          // Eğimli yüzeye yaklaştıkça arabayı o yüzey seviyesine yükselt (Rampa Algılaması)
-          if (topHit.distance <= 0.22 && topHit.point.y > effectiveFloorY) {
+          // Sadece araba ile temas noktasındaki fark 0.04m (4 cm) ve altındaysa zemin say
+          var distToHit = carMesh.position.y - topHit.point.y;
+          if (distToHit >= -0.01 && distToHit <= 0.04 && topHit.point.y > effectiveFloorY) {
             effectiveFloorY = topHit.point.y;
           }
         }
 
-        // 2. YAN TARAFTAN DUVALARA TİTREMESİZ MÜDAHALE
+        // 2. YAN VEYA YÜKSEKTEKİ HITBOX ÇARPIŞMALARI
         var carBox = new THREE.Box3().setFromObject(carMesh);
         
         for (var h = 0; h < hitboxVisuals.length; h++) {
@@ -1036,18 +1037,16 @@
           if (carBox.intersectsBox(hbBox)) {
             var hbTopHeight = hbBox.max.y;
 
-            // Eğer arabanın altı kutunun tepe seviyesinden aşağıdaysa yanal bir engeldir
-            if (carMesh.position.y < hbTopHeight - 0.008) {
+            // Eğer arabanın altı kutunun üst kenar seviyesinin altındaysa bu bir engeldir
+            if (carMesh.position.y < hbTopHeight - 0.005) {
               var centerDiff = new THREE.Vector3().subVectors(carMesh.position, hbMesh.position);
               centerDiff.y = 0;
               
               if (centerDiff.lengthSq() > 0.000001) {
                 centerDiff.normalize();
-                // Titremeyi önleyen yumuşak kaydırma
                 carMesh.position.add(centerDiff.multiplyScalar(0.003)); 
               }
 
-              // Yan çarpmada hızın %20'si korunur, aniden sıfırlanıp glitch yapmaz
               currentSpeed *= 0.8;
               break;
             }
@@ -1058,7 +1057,7 @@
       var currentMinY = effectiveFloorY + carHeightOffset;
       var isGroundedNow = (carMesh.position.y <= currentMinY + 0.003);
 
-      // PLATFORMDAN DÜŞÜŞ VE YATAY HIZ DÖNÜŞÜMÜ (PITCH / ROLL)
+      // PLATFORMDAN DÜŞÜŞ VEYA ZIRILTI ENGELLEME
       if (wasGroundedLastFrame && !isGroundedNow && carMesh.position.y > FLOOR_Y + CAR_HEIGHT_UPRIGHT) {
         var forwardVec = new THREE.Vector3(0, 0, currentSpeed).applyQuaternion(carMesh.quaternion);
         velocity.x = forwardVec.x / delta;
@@ -1086,11 +1085,10 @@
         carMesh.position.z += velocity.z * delta;
       }
 
-      // ZEMİNE VEYA RAMPA YÜZEYİNE İNİŞ (MOMENTUM KORUMASI)
+      // ZEMİNE VEYA RAMPA YÜZEYİNE İNİŞ
       if (carMesh.position.y <= currentMinY) {
         carMesh.position.y = currentMinY;
 
-        // Havadan yere inerken yatay momentumu (velocity.x ve z) aracın sürüş hızına (currentSpeed) aktar
         if (Math.abs(velocity.x) > 0.01 || Math.abs(velocity.z) > 0.01) {
           var horizVel = new THREE.Vector3(velocity.x, 0, velocity.z);
           var horizSpeed = horizVel.length() * delta;
@@ -1102,7 +1100,6 @@
           var dot = horizVel.clone().normalize().dot(carForward);
           currentSpeed = (dot < 0) ? -horizSpeed : horizSpeed;
 
-          // Havada kazanılan fizik hızlarını sıfırla, sürüş moduna geç
           velocity.set(0, 0, 0);
         }
 
@@ -1114,7 +1111,6 @@
           velocity.y = 0;
           smoothAlignToFloor(!isUpright, 0.25);
 
-          // NORMAL VE PÜRÜZSÜZ SÜRÜŞ KONTROLÜ
           if (isUpright && !isMenuOpen) {
             if (isThrottlePressed) {
               if (currentSpeed > MAX_SPEED_FORWARD) {
@@ -1130,7 +1126,6 @@
               }
             } 
             else {
-              // Yere değdiğinde momentum aniden yok olmaz, FRICTION oranı kadar yumuşakça yavaşlar
               currentSpeed *= FRICTION;
               if (Math.abs(currentSpeed) < 0.00002) currentSpeed = 0;
             }
