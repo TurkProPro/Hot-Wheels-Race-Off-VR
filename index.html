@@ -1,132 +1,360 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D .GLB Araç Sürüşü</title>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #111; }
-        canvas { display: block; }
-        #info {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
-            font-family: sans-serif;
-            font-weight: bold;
-            pointer-events: none;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 8px 12px;
-            border-radius: 4px;
-        }
-    </style>
-    <!-- Three.js ve glTF/GLB Yükleyici -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hot Wheels MR - Acceleracers Reverb</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #000;
+      color: #fff;
+      font-family: sans-serif;
+    }
+    #start-btn {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 20px 40px;
+      font-size: 22px;
+      font-weight: bold;
+      background-color: #00ffcc;
+      color: #000;
+      border: 3px solid #fff;
+      border-radius: 12px;
+      cursor: pointer;
+      box-shadow: 0 0 25px #00ffcc;
+      z-index: 9999;
+    }
+    #loading-text {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 18px;
+      color: #00ffcc;
+      display: none;
+      z-index: 9999;
+    }
+  </style>
+
+  <!-- Three.js ve GLTFLoader Kütüphaneleri -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
 </head>
 <body>
 
-    <div id="info">W/A/S/D veya Yön Tuşları ile Arabayı Sürün</div>
+  <button id="start-btn">HOT WHEELS MR'I BAŞLAT</button>
+  <div id="loading-text">Model Yükleniyor...</div>
 
-    <script>
-        // 1. Sahne, Kamera ve Render
-        const scene = new THREE.Scene();
-        scene.background = new THREE.Color(0x22222d);
+<script>
+  var scene, camera, renderer;
+  var carMesh; // Fizik ve tutma işlemleri için kullanılan kapsayıcı (Hitbox)
 
-        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 5, 10);
+  // Kontrol Değişkenleri
+  var isMovingForward = false;
+  var isMovingBackward = false;
+  var turnValue = 0;
+  var speed = 0;
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.shadowMap.enabled = true;
-        document.body.appendChild(renderer.domElement);
+  // Fizik & Tutma Değişkenleri
+  var activeGrabber = null; // 'left' veya 'right'
+  var isJustGrabbed = false;
 
-        // 2. Işıklandırma
-        const ambientLight = new THREE.AmbientLight(0xffffff, 1.2);
-        scene.add(ambientLight);
+  var velocity = new THREE.Vector3(0, 0, 0); 
+  var angularVelocity = new THREE.Vector3(0, 0, 0); 
+  
+  var lastControllerPos = new THREE.Vector3(0, 0, 0);
+  var lastControllerEuler = new THREE.Euler(0, 0, 0);
+  
+  var GRAVITY = -9.81;
+  var FLOOR_Y = 0.011; // Reverb'ün basık yapısına göre zemin seviyesi
+  var GRAB_RADIUS = 0.05; // 5 cm hassas temas mesafesi
 
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
-        dirLight.position.set(10, 20, 10);
-        dirLight.castShadow = true;
-        scene.add(dirLight);
+  var leftController = null;
+  var rightController = null;
+  var isSpawnedAtUser = false;
 
-        // 3. Zemin (Pist)
-        const grid = new THREE.GridHelper(100, 50, 0x00ffcc, 0x444444);
-        scene.add(grid);
+  var startBtn = document.getElementById('start-btn');
+  var loadingText = document.getElementById('loading-text');
 
-        // 4. .GLB Modeli Yükleme
-        let car;
-        const loader = new THREE.GLTFLoader();
-        
-        // Buradaki dosya adının sizin .glb dosyanızla birebir aynı olduğundan emin olun
-        loader.load('car_model.glb', (gltf) => {
-            car = gltf.scene;
-            
-            // Eğer model ekranda devasa veya minicik görünürse buradaki ölçeği ayarlayabilirsiniz (örn: 1, 1, 1)
-            car.scale.set(0.5, 0.5, 0.5); 
-            car.position.set(0, 0, 0);
-            
-            car.traverse((child) => {
-                if (child.isMesh) {
-                    child.castShadow = true;
-                    child.receiveShadow = true;
-                }
-            });
+  startBtn.addEventListener('click', function() {
+    if (!navigator.xr) {
+      alert('WebXR desteklenmiyor!');
+      return;
+    }
 
-            scene.add(car);
-            console.log(".GLB Modeli başarıyla yüklendi!");
-        }, 
-        (xhr) => {
-            console.log((xhr.loaded / xhr.total * 100) + '% yüklendi');
-        },
-        (error) => {
-            console.error("GLB Yükleme Hatası:", error);
-        });
+    navigator.xr.requestSession('immersive-ar', {
+      optionalFeatures: ['hit-test', 'dom-overlay', 'local-floor', 'bounded-floor'],
+      domOverlay: { root: document.body }
+    }).then(function(session) {
+      startBtn.style.display = 'none';
+      initThreeJS(session);
+    }).catch(function(err) {
+      alert('MR Başlatılamadı: ' + err.message);
+    });
+  });
 
-        // 5. Araç Kontrolleri
-        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, w: false, s: false, a: false, d: false };
-        let speed = 0;
-        const maxSpeed = 0.25;
-        const accel = 0.008;
-        const friction = 0.97;
+  function initThreeJS(session) {
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.01, 20);
 
-        window.addEventListener('keydown', (e) => keys[e.key] = true);
-        window.addEventListener('keyup', (e) => keys[e.key] = false);
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.xr.enabled = true;
 
-        // 6. Oyun Döngüsü
-        function animate() {
-            requestAnimationFrame(animate);
+    try {
+      renderer.xr.setReferenceSpaceType('bounded-floor');
+    } catch(e) {
+      renderer.xr.setReferenceSpaceType('local-floor');
+    }
 
-            if (car) {
-                // İleri / Geri
-                if (keys.ArrowUp || keys.w) speed += accel;
-                if (keys.ArrowDown || keys.s) speed -= accel;
+    renderer.xr.setSession(session);
+    document.body.appendChild(renderer.domElement);
 
-                // Dönüşler
-                if (keys.ArrowLeft || keys.a) car.rotation.y += 0.04 * (speed / maxSpeed);
-                if (keys.ArrowRight || keys.d) car.rotation.y -= 0.04 * (speed / maxSpeed);
+    // Işıklandırma (Reverb'ün detaylarını ve renklerini öne çıkarmak için)
+    var light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.8);
+    scene.add(light);
 
-                // Sürtünme ve Hareket
-                speed *= friction;
-                car.translateZ(speed);
+    var dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+    dirLight.position.set(1, 3, 2);
+    scene.add(dirLight);
 
-                // Kamera Takibi
-                const relativeCameraOffset = new THREE.Vector3(0, 3, -8);
-                const cameraOffset = relativeCameraOffset.applyMatrix4(car.matrixWorld);
-                camera.position.lerp(cameraOffset, 0.1);
-                camera.lookAt(car.position);
-            }
+    // REVERB İÇİN ÖZEL HITBOX (Görünmez Kapsayıcı Kutu)
+    // Reverb'ün ebatları: En 3.2cm, Yükseklik 2.2cm, Uzunluk 7.2cm
+    var hitboxGeometry = new THREE.BoxGeometry(0.032, 0.022, 0.072);
+    var hitboxMaterial = new THREE.MeshBasicMaterial({ visible: false }); // Şeffaf/Görünmez
+    carMesh = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
+    carMesh.position.set(0, FLOOR_Y, -0.5);
+    scene.add(carMesh);
 
-            renderer.render(scene, camera);
+    // GLTF / GLB YÜKLEYİCİ (.GLB Model Entegrasyonu)
+    loadingText.style.display = 'block';
+    var loader = new THREE.GLTFLoader();
+
+    // Kullandığın .glb dosya adının tam burada eşleştiğinden emin ol (örneğin 'car_model.glb' veya 'reverb.glb')
+    loader.load('car_model.glb', function(gltf) {
+      var reverbModel = gltf.scene;
+
+      // Model Ölçeklendirme (Hot Wheels ölçeği)
+      reverbModel.scale.set(0.035, 0.035, 0.035);
+
+      // Gölgeleri ve Materyal Detaylarını Aktifleştir
+      reverbModel.traverse(function(child) {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+
+      // Modelin Alt Tabanını Otomatik Zemine Hizala
+      var bbox = new THREE.Box3().setFromObject(reverbModel);
+      reverbModel.position.y = -bbox.min.y - (0.022 / 2); 
+
+      // Modeli Hitbox (carMesh) İçine Ekle
+      carMesh.add(reverbModel);
+      loadingText.style.display = 'none';
+
+    }, function(xhr) {
+      if (xhr.total > 0) {
+        var percent = Math.round((xhr.loaded / xhr.total) * 100);
+        loadingText.innerText = 'Araba Yükleniyor... %' + percent;
+      }
+    }, function(error) {
+      console.error('GLB model yüklenirken hata oluştu:', error);
+      loadingText.innerText = 'GLB Dosyası Yüklenemedi! Dosya adını kontrol edin.';
+    });
+
+    // Kumandaları Tanımla
+    leftController = renderer.xr.getController(0);
+    scene.add(leftController);
+
+    rightController = renderer.xr.getController(1);
+    scene.add(rightController);
+
+    renderer.setAnimationLoop(render);
+  }
+
+  var lastTime = performance.now();
+
+  function render(time, frame) {
+    var session = renderer.xr.getSession();
+    var delta = (time - lastTime) / 1000;
+    if (delta > 0.1) delta = 0.1;
+    lastTime = time;
+
+    // Oyuncu Hizalama
+    if (!isSpawnedAtUser && camera) {
+      var camPos = new THREE.Vector3();
+      camera.getWorldPosition(camPos);
+      
+      if (Math.abs(camPos.x) > 0.001 || Math.abs(camPos.z) > 0.001) {
+        carMesh.position.set(camPos.x, FLOOR_Y, camPos.z - 0.4);
+        isSpawnedAtUser = true;
+      }
+    }
+
+    var leftTriggerPressed = false;
+    var rightTriggerPressed = false;
+
+    if (session && session.inputSources) {
+      isMovingForward = false;
+      isMovingBackward = false;
+      turnValue = 0;
+
+      for (var i = 0; i < session.inputSources.length; i++) {
+        var source = session.inputSources[i];
+        if (!source.gamepad) continue;
+
+        // Sağ Kumanda (Gaz / Fren)
+        if (source.handedness === 'right') {
+          if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
+            rightTriggerPressed = true;
+            if (!activeGrabber) isMovingForward = true;
+          }
+          if (source.gamepad.buttons[1] && source.gamepad.buttons[1].value > 0.1) {
+            if (!activeGrabber) isMovingBackward = true;
+          }
         }
 
-        animate();
+        // Sol Kumanda (Direksiyon)
+        if (source.handedness === 'left') {
+          if (source.gamepad.axes.length >= 2) {
+            var axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
+            if (Math.abs(axisVal) > 0.1) {
+              turnValue = axisVal;
+            }
+          }
 
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-    </script>
+          if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
+            leftTriggerPressed = true;
+          }
+        }
+      }
+    }
+
+    // TUTMA TESPİTİ VE MESAFE KONTROLÜ
+    var leftPos = new THREE.Vector3();
+    var rightPos = new THREE.Vector3();
+
+    if (leftController) leftController.getWorldPosition(leftPos);
+    if (rightController) rightController.getWorldPosition(rightPos);
+
+    var distLeft = leftPos.distanceTo(carMesh.position);
+    var distRight = rightPos.distanceTo(carMesh.position);
+
+    var prevGrabber = activeGrabber;
+
+    if (leftTriggerPressed && (distLeft < GRAB_RADIUS || activeGrabber === 'left')) {
+      activeGrabber = 'left';
+    } else if (rightTriggerPressed && (distRight < GRAB_RADIUS || activeGrabber === 'right')) {
+      activeGrabber = 'right';
+    } else {
+      activeGrabber = null;
+    }
+
+    if (activeGrabber && !prevGrabber) {
+      isJustGrabbed = true;
+    }
+
+    // TUTULUYORSA (REVERB'İ ELE HİZALA VE İVME HESAPLA)
+    if (activeGrabber) {
+      var activeController = (activeGrabber === 'left') ? leftController : rightController;
+
+      if (activeController) {
+        var controllerPos = new THREE.Vector3();
+        var controllerQuat = new THREE.Quaternion();
+
+        activeController.getWorldPosition(controllerPos);
+        activeController.getWorldQuaternion(controllerQuat);
+
+        if (isJustGrabbed) {
+          lastControllerPos.copy(controllerPos);
+          lastControllerEuler.setFromQuaternion(controllerQuat, 'XYZ');
+          velocity.set(0, 0, 0);
+          angularVelocity.set(0, 0, 0);
+          isJustGrabbed = false;
+        } else if (delta > 0) {
+          velocity.subVectors(controllerPos, lastControllerPos).divideScalar(delta);
+          lastControllerPos.copy(controllerPos);
+
+          var currentEuler = new THREE.Euler().setFromQuaternion(controllerQuat, 'XYZ');
+          angularVelocity.set(
+            (currentEuler.x - lastControllerEuler.x) / delta,
+            (currentEuler.y - lastControllerEuler.y) / delta,
+            (currentEuler.z - lastControllerEuler.z) / delta
+          );
+          lastControllerEuler.copy(currentEuler);
+        }
+
+        carMesh.position.copy(controllerPos);
+        carMesh.quaternion.copy(controllerQuat);
+      }
+    } 
+    // SERBEST DÜŞÜŞ VE ZEMİN FİZİĞİ
+    else {
+      // 1. Havadaysa Yerçekimi ve Dönme
+      if (carMesh.position.y > FLOOR_Y) {
+        velocity.y += GRAVITY * delta;
+
+        carMesh.rotation.x += angularVelocity.x * delta;
+        carMesh.rotation.y += angularVelocity.y * delta;
+        carMesh.rotation.z += angularVelocity.z * delta;
+      }
+
+      carMesh.position.x += velocity.x * delta;
+      carMesh.position.y += velocity.y * delta;
+      carMesh.position.z += velocity.z * delta;
+
+      // 2. Zemine Çarpma Anı ve Otomatik Devrilip Yatış Fiziği
+      if (carMesh.position.y <= FLOOR_Y) {
+        carMesh.position.y = FLOOR_Y;
+        velocity.y = 0;
+
+        angularVelocity.multiplyScalar(0.1);
+
+        // Arabayı yerçekimi etkisiyle düzleştiren tork düzeltmesi
+        var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
+        currentEuler.x = THREE.MathUtils.lerp(currentEuler.x, 0, 0.15);
+        currentEuler.z = THREE.MathUtils.lerp(currentEuler.z, 0, 0.15);
+
+        carMesh.quaternion.setFromEuler(currentEuler);
+
+        velocity.x *= 0.85;
+        velocity.z *= 0.85;
+      }
+
+      // 3. Sürüş Kontrolü
+      var upVector = new THREE.Vector3(0, 1, 0);
+      upVector.applyQuaternion(carMesh.quaternion);
+
+      var isUpright = upVector.y > 0.7;
+
+      if (carMesh.position.y <= FLOOR_Y + 0.005 && isUpright) {
+        if (isMovingForward) {
+          speed = -0.008;
+        } else if (isMovingBackward) {
+          speed = 0.004;
+        } else {
+          speed = 0;
+        }
+
+        if (speed !== 0 && Math.abs(turnValue) > 0.1) {
+          var directionMultiplier = speed < 0 ? 1 : -1;
+          carMesh.rotation.y -= turnValue * 0.08 * directionMultiplier;
+        }
+
+        carMesh.translateZ(speed);
+      } else {
+        speed = 0;
+      }
+    }
+
+    renderer.render(scene, camera);
+  }
+</script>
 </body>
 </html>
