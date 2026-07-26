@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb (3D Controller Menu)</title>
+  <title>Hot Wheels MR - Acceleracers Reverb (Button Fix)</title>
   <style>
     body {
       margin: 0;
@@ -80,7 +80,7 @@
   var FLOOR_Y = 0.008; 
   var GRAB_RADIUS = 0.05; 
 
-  // Kumandalar & 3D Menü
+  // Kumandalar & Menü
   var leftController = null;
   var rightController = null;
   var isSpawnedAtUser = false;
@@ -88,22 +88,16 @@
   var isMenuOpen = false;
   var isLevelingMode = false;
   var menuButtonPressedLastFrame = false;
+  var xButtonPressedLastFrame = false;
 
-  // 3D Menü Nesneleri
-  var menuGroup;
+  // 3D Kare Menü Nesneleri
+  var squareMenuMesh;
   var canvasMenu, ctxMenu, textureMenu;
-  var canvasLeveling, ctxLeveling, textureLeveling;
-  var menuMesh, levelingMesh;
-
-  // Lazer & Raycaster (Menü Tıklamaları İçin)
-  var raycaster = new THREE.Raycaster();
-  var controllerLine;
-  var rightTriggerPressedLastFrame = false;
 
   var startBtn = document.getElementById('start-btn');
   var loadingText = document.getElementById('loading-text');
 
-  // --- MODEL ÖNDEN YÜKLEME ---
+  // --- MODELİ ÖNDEN YÜKLE ---
   var loader = new THREE.GLTFLoader();
 
   loader.load('./car_model.glb', function(gltf) {
@@ -144,7 +138,7 @@
     loadingText.innerText = 'HATA: "car_model.glb" bulunamadı!';
   });
 
-  // WEBXR BAŞLATMA
+  // WEBXR BAŞLAT
   startBtn.addEventListener('click', function() {
     if (!navigator.xr) {
       alert('WebXR desteklenmiyor!');
@@ -161,76 +155,56 @@
     });
   });
 
-  // --- 3D CANVAS MENÜ DOKULARI ÇİZİMİ ---
-  function create3DMenuTextures() {
-    // 1. Ana Menü Canvas
-    canvasMenu = document.createElement('canvas');
-    canvasMenu.width = 512;
-    canvasMenu.height = 512;
-    ctxMenu = canvasMenu.getContext('2d');
-
-    ctxMenu.fillStyle = 'rgba(10, 10, 15, 0.9)';
+  // KARE MENÜ DOKUSUNU GÜNCELLEME
+  function updateMenuTexture() {
+    ctxMenu.fillStyle = 'rgba(15, 15, 20, 0.95)';
     ctxMenu.fillRect(0, 0, 512, 512);
-    ctxMenu.strokeStyle = '#00ffcc';
-    ctxMenu.lineWidth = 10;
-    ctxMenu.strokeRect(5, 5, 502, 502);
 
-    ctxMenu.fillStyle = '#00ffcc';
-    ctxMenu.font = 'bold 42px sans-serif';
-    ctxMenu.textAlign = 'center';
-    ctxMenu.fillText('AYARLAR', 256, 80);
+    if (!isLevelingMode) {
+      // Normal Menü Görünümü
+      ctxMenu.strokeStyle = '#00ffcc';
+      ctxMenu.lineWidth = 12;
+      ctxMenu.strokeRect(6, 6, 500, 500);
 
-    // Buton 1: Leveling
-    ctxMenu.fillStyle = '#00ffcc';
-    ctxMenu.beginPath();
-    ctxMenu.roundRect(50, 150, 412, 100, 20);
-    ctxMenu.fill();
-    ctxMenu.fillStyle = '#000';
-    ctxMenu.font = 'bold 32px sans-serif';
-    ctxMenu.fillText('MANUEL LEVELING', 256, 212);
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 44px sans-serif';
+      ctxMenu.textAlign = 'center';
+      ctxMenu.fillText('MENÜ', 256, 100);
 
-    // Buton 2: Kapat
-    ctxMenu.fillStyle = '#ff3366';
-    ctxMenu.beginPath();
-    ctxMenu.roundRect(50, 310, 412, 100, 20);
-    ctxMenu.fill();
-    ctxMenu.fillStyle = '#fff';
-    ctxMenu.fillText('KAPAT', 256, 372);
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = 'bold 32px sans-serif';
+      ctxMenu.fillText('LEVELING İÇİN', 256, 240);
+      
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 48px sans-serif';
+      ctxMenu.fillText('[ X ] TUŞUNA BAS', 256, 320);
 
-    textureMenu = new THREE.CanvasTexture(canvasMenu);
+      ctxMenu.fillStyle = '#aaaaaa';
+      ctxMenu.font = '24px sans-serif';
+      ctxMenu.fillText('Menü Tuşu = Kapat', 256, 440);
+    } else {
+      // Leveling Modu Görünümü
+      ctxMenu.strokeStyle = '#ffcc00';
+      ctxMenu.lineWidth = 12;
+      ctxMenu.strokeRect(6, 6, 500, 500);
 
-    // 2. Leveling Modu Canvas
-    canvasLeveling = document.createElement('canvas');
-    canvasLeveling.width = 512;
-    canvasLeveling.height = 512;
-    ctxLeveling = canvasLeveling.getContext('2d');
+      ctxMenu.fillStyle = '#ffcc00';
+      ctxMenu.font = 'bold 40px sans-serif';
+      ctxMenu.textAlign = 'center';
+      ctxMenu.fillText('LEVELING MODU', 256, 90);
 
-    ctxLeveling.fillStyle = 'rgba(10, 10, 15, 0.9)';
-    ctxLeveling.fillRect(0, 0, 512, 512);
-    ctxLeveling.strokeStyle = '#ffcc00';
-    ctxLeveling.lineWidth = 10;
-    ctxLeveling.strokeRect(5, 5, 502, 502);
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = '28px sans-serif';
+      ctxMenu.fillText('Sol Stick İle', 256, 180);
+      ctxMenu.fillText('Yüksekliği Ayarla', 256, 220);
 
-    ctxLeveling.fillStyle = '#ffcc00';
-    ctxLeveling.font = 'bold 36px sans-serif';
-    ctxLeveling.textAlign = 'center';
-    ctxLeveling.fillText('LEVELING MODU', 256, 80);
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 40px sans-serif';
+      ctxMenu.fillText('Bitirmek İçin:', 256, 330);
+      ctxMenu.fillText('[ X ] TUŞUNA BAS', 256, 390);
+    }
 
-    ctxLeveling.fillStyle = '#ffffff';
-    ctxLeveling.font = '24px sans-serif';
-    ctxLeveling.fillText('Sol Stick (Yukarı/Aşağı)', 256, 160);
-    ctxLeveling.fillText('ile yüksekliği ayarlayın.', 256, 200);
-
-    // Done Butonu
-    ctxLeveling.fillStyle = '#00ffcc';
-    ctxLeveling.beginPath();
-    ctxLeveling.roundRect(50, 300, 412, 120, 20);
-    ctxLeveling.fill();
-    ctxLeveling.fillStyle = '#000';
-    ctxLeveling.font = 'bold 40px sans-serif';
-    ctxLeveling.fillText('DONE', 256, 375);
-
-    textureLeveling = new THREE.CanvasTexture(canvasLeveling);
+    textureMenu.needsUpdate = true;
   }
 
   function initThreeJS(session) {
@@ -268,42 +242,33 @@
       carMesh.add(loadedReverbModel);
     }
 
-    // Sol ve Sağ Kumandalar
+    // Kumandalar
     leftController = renderer.xr.getController(0);
     scene.add(leftController);
 
     rightController = renderer.xr.getController(1);
     scene.add(rightController);
 
-    // Sağ Kumanda İçin Lazer Çizgisi
-    var lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -2)]);
-    var lineMat = new THREE.LineBasicMaterial({ color: 0x00ffcc, transparent: true, opacity: 0.5 });
-    controllerLine = new THREE.Line(lineGeo, lineMat);
-    rightController.add(controllerLine);
+    // Kare Menü 3D Nesnesi
+    canvasMenu = document.createElement('canvas');
+    canvasMenu.width = 512;
+    canvasMenu.height = 512;
+    ctxMenu = canvasMenu.getContext('2d');
+    textureMenu = new THREE.CanvasTexture(canvasMenu);
 
-    // 3D Menü Panellerini Hazırla ve Sol Kumandaya Bağla
-    create3DMenuTextures();
-    menuGroup = new THREE.Group();
+    updateMenuTexture();
 
-    var planeGeo = new THREE.PlaneGeometry(0.18, 0.18); // 18cm x 18cm boyutunda 3D panel
+    // 15cm x 15cm kare panel
+    var planeGeo = new THREE.PlaneGeometry(0.15, 0.15); 
+    var planeMat = new THREE.MeshBasicMaterial({ map: textureMenu, side: THREE.DoubleSide, transparent: true });
+    squareMenuMesh = new THREE.Mesh(planeGeo, planeMat);
 
-    var matMenu = new THREE.MeshBasicMaterial({ map: textureMenu, side: THREE.DoubleSide, transparent: true });
-    menuMesh = new THREE.Mesh(planeGeo, matMenu);
-    menuMesh.name = "menuMesh";
+    // Sol Kumandanın 12cm yukarısına konumlandır
+    squareMenuMesh.position.set(0, 0.12, -0.05);
+    squareMenuMesh.rotation.x = -Math.PI / 6; 
+    squareMenuMesh.visible = false;
 
-    var matLeveling = new THREE.MeshBasicMaterial({ map: textureLeveling, side: THREE.DoubleSide, transparent: true });
-    levelingMesh = new THREE.Mesh(planeGeo, matLeveling);
-    levelingMesh.name = "levelingMesh";
-
-    menuGroup.add(menuMesh);
-    menuGroup.add(levelingMesh);
-
-    // Menüyü Sol Kumandanın 12cm Üstüne ve 5cm İlerisine Konumlandır
-    menuGroup.position.set(0, 0.12, -0.05);
-    menuGroup.rotation.x = -Math.PI / 6; // Kullanıcıya doğru hafif yatık durması için
-    menuGroup.visible = false;
-
-    leftController.add(menuGroup);
+    leftController.add(squareMenuMesh);
 
     renderer.setAnimationLoop(render);
   }
@@ -338,52 +303,55 @@
         var source = session.inputSources[i];
         if (!source.gamepad) continue;
 
-        // SAĞ KUMANDA (Gaz / Fren & Lazer Tıklamaları)
+        var btns = source.gamepad.buttons;
+
+        // SAĞ KUMANDA (0: Trigger, 1: Grip)
         if (source.handedness === 'right') {
-          var isRightTrigger = source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1;
-          
-          if (isRightTrigger) {
+          if (btns[0] && btns[0].value > 0.1) {
             rightTriggerPressed = true;
             if (!activeGrabber && !isMenuOpen && !isLevelingMode) isThrottlePressed = true;
           }
-          if (source.gamepad.buttons[1] && source.gamepad.buttons[1].value > 0.1) {
+          if (btns[1] && btns[1].value > 0.1) {
             if (!activeGrabber && !isMenuOpen && !isLevelingMode) isBrakePressed = true;
           }
-
-          // 3D Menü Tıklama Kontrolü (Sağ Tetik Basıldığı An)
-          if (isRightTrigger && !rightTriggerPressedLastFrame && menuGroup.visible) {
-            handleMenuClick();
-          }
-          rightTriggerPressedLastFrame = isRightTrigger;
         }
 
-        // SOL KUMANDA (Direksiyon, Üç Çizgi Menü Tuşu & Leveling)
+        // SOL KUMANDA 
         if (source.handedness === 'left') {
           var axes = source.gamepad.axes;
 
-          // Sol Kumanda 3 Çizgi Tuşu (Button 1)
-          var menuBtnPressed = source.gamepad.buttons[1] && source.gamepad.buttons[1].pressed;
+          // 1. Sol Kumanda Menü Tuşu (Düzeltildi: Grip button[1] es geçildi, 5. veya 3. tuş kontrol ediliyor)
+          var menuBtnPressed = (btns[5] && btns[5].pressed) || (btns[3] && btns[3].pressed);
           if (menuBtnPressed && !menuButtonPressedLastFrame) {
-            if (!isLevelingMode) {
-              isMenuOpen = !isMenuOpen;
-              menuGroup.visible = isMenuOpen;
-              menuMesh.visible = true;
-              levelingMesh.visible = false;
+            isMenuOpen = !isMenuOpen;
+            if (!isMenuOpen) {
+              isLevelingMode = false;
             }
+            squareMenuMesh.visible = isMenuOpen;
+            updateMenuTexture();
           }
           menuButtonPressedLastFrame = menuBtnPressed;
 
-          // Leveling Modunda Y Yüksekliği Ayarlama
+          // 2. Sol Kumanda X Tuşu (WebXR Standardında X tuşu button 4'tür)
+          var xBtnPressed = (btns[4] && btns[4].pressed);
+
+          if (xBtnPressed && !xButtonPressedLastFrame && isMenuOpen) {
+            isLevelingMode = !isLevelingMode; 
+            updateMenuTexture();
+          }
+          xButtonPressedLastFrame = xBtnPressed;
+
+          // 3. Leveling Modunda Yükseklik Ayarı (Sol Stick Y Ekseni)
           if (isLevelingMode && axes && axes.length > 1) {
             var axisY = axes.length >= 4 ? axes[3] : axes[1];
             if (Math.abs(axisY) > 0.1) {
-              FLOOR_Y -= axisY * 0.002; // Canlı Yükseklik Değişimi
+              FLOOR_Y -= axisY * 0.002; 
               if (!activeGrabber) {
                 carMesh.position.y = FLOOR_Y;
               }
             }
           } 
-          // Sürüşte Direksiyon
+          // 4. Normal Direksiyon Kontrolü
           else if (!isMenuOpen && axes && axes.length > 0) {
             var axisX = axes.length >= 4 ? axes[2] : axes[0];
             if (Math.abs(axisX) > 0.05) {
@@ -391,7 +359,7 @@
             }
           }
 
-          if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
+          if (btns[0] && btns[0].value > 0.1) {
             leftTriggerPressed = true;
           }
         }
@@ -534,48 +502,6 @@
     }
 
     renderer.render(scene, camera);
-  }
-
-  // --- 3D MENÜ ARAYÜZ TIKLAMA HESAPLAMASI ---
-  function handleMenuClick() {
-    if (!rightController) return;
-
-    var tempMatrix = new THREE.Matrix4();
-    tempMatrix.identity().extractRotation(rightController.matrixWorld);
-
-    raycaster.ray.origin.setFromMatrixPosition(rightController.matrixWorld);
-    raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
-
-    var intersects = raycaster.intersectObjects(menuGroup.children);
-
-    if (intersects.length > 0) {
-      var hit = intersects[0];
-      var uv = hit.uv; // Tıklanan noktanın 0-1 arası koordinatı
-
-      // 1. ANA MENÜ
-      if (menuMesh.visible && hit.object.name === "menuMesh") {
-        // "MANUEL LEVELING" Butonu (Y koordinatı 0.51 - 0.70 arası)
-        if (uv.y >= 0.51 && uv.y <= 0.70) {
-          isLevelingMode = true;
-          isMenuOpen = false;
-          menuMesh.visible = false;
-          levelingMesh.visible = true;
-        } 
-        // "KAPAT" Butonu (Y koordinatı 0.20 - 0.39 arası)
-        else if (uv.y >= 0.20 && uv.y <= 0.39) {
-          isMenuOpen = false;
-          menuGroup.visible = false;
-        }
-      } 
-      // 2. LEVELING MODU
-      else if (levelingMesh.visible && hit.object.name === "levelingMesh") {
-        // "DONE" Butonu (Y koordinatı 0.17 - 0.41 arası)
-        if (uv.y >= 0.17 && uv.y <= 0.41) {
-          isLevelingMode = false;
-          menuGroup.visible = false;
-        }
-      }
-    }
   }
 </script>
 </body>
