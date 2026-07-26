@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Steering & Speed Fix Update</title>
+  <title>Hot Wheels MR - Physics & Menu Lock Update</title>
   <style>
     body {
       margin: 0;
@@ -82,11 +82,12 @@
   var CAR_HEIGHT_UPRIGHT = 0.012; 
   var CAR_HEIGHT_UPSIDEDOWN = 0.010; 
   
-  var BOUNCE_FACTOR = 0.45;       
-  var BOUNCE_THRESHOLD = 0.20;    
+  var BOUNCE_FACTOR = 0.35;       
+  var BOUNCE_THRESHOLD = 0.25;    
   var GRAB_RADIUS = 0.12; 
 
   var downRaycaster = new THREE.Raycaster();
+  var sideRaycaster = new THREE.Raycaster();
 
   // Kumandalar
   var controller0 = null;
@@ -124,6 +125,7 @@
   var rotX = 0, rotY = 0, rotZ = 0;
 
   var activeSubSelection = 0;  
+  var isEditingValue = false; // A tuşu kilit mekanizması
 
   var rainbowPalette = [
     { name: "Gri (Default)", hex: 0x888888, str: "#888888" },
@@ -320,10 +322,10 @@
     } else if (activeMode === "HITBOX_COLOR_EDIT") {
       ctxMenu.fillStyle = '#00ffcc';
       ctxMenu.font = 'bold 22px sans-serif';
-      ctxMenu.fillText('HITBOX ' + (selectedHitboxIndex + 1) + ' ÖZELLİK & EĞİM AYARI', 256, 70);
+      ctxMenu.fillText('HITBOX ' + (selectedHitboxIndex + 1) + ' ÖZELLİK & EĞİM AYARI', 256, 65);
 
       var startX = 166;
-      var startY = 85;
+      var startY = 80;
       var boxSize = 48;
       var gap = 10;
 
@@ -337,7 +339,7 @@
         ctxMenu.fillRect(bx, by, boxSize, boxSize);
 
         if (r === selectedColorIndex && activeSubSelection === 0) {
-          ctxMenu.strokeStyle = '#ffffff';
+          ctxMenu.strokeStyle = isEditingValue ? '#ffcc00' : '#ffffff';
           ctxMenu.lineWidth = 4;
           ctxMenu.strokeRect(bx - 2, by - 2, boxSize + 4, boxSize + 4);
         } else {
@@ -347,19 +349,16 @@
         }
       }
 
-      drawSlider(265, "Şeffaflık: %" + Math.round(currentOpacity * 100), (currentOpacity - 0.1) / 0.9, activeSubSelection === 1);
-      drawSlider(325, "Parlaklık: %" + Math.round(currentBrightness * 100), currentBrightness, activeSubSelection === 2);
+      drawSlider(260, "Şeffaflık: %" + Math.round(currentOpacity * 100), (currentOpacity - 0.1) / 0.9, activeSubSelection === 1);
+      drawSlider(315, "Parlaklık: %" + Math.round(currentBrightness * 100), currentBrightness, activeSubSelection === 2);
 
-      ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = '16px sans-serif';
+      drawOptionRow(370, "Eğim X (Pitch): " + Math.round(rotX) + "°", activeSubSelection === 3);
+      drawOptionRow(405, "Eğim Y (Yaw): " + Math.round(rotY) + "°", activeSubSelection === 4);
+      drawOptionRow(440, "Eğim Z (Roll): " + Math.round(rotZ) + "°", activeSubSelection === 5);
 
-      drawOptionRow(380, "Eğim X (Pitch): " + rotX + "°", activeSubSelection === 3);
-      drawOptionRow(415, "Eğim Y (Yaw): " + rotY + "°", activeSubSelection === 4);
-      drawOptionRow(450, "Eğim Z (Roll): " + rotZ + "°", activeSubSelection === 5);
-
-      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.fillStyle = isEditingValue ? '#ffcc00' : '#00ffcc';
       ctxMenu.font = '15px sans-serif';
-      ctxMenu.fillText('Sol Stick Sağ/Sol: Ayarla | Alt/Üst: Seçenek | [ X ] Kaydet', 256, 490);
+      ctxMenu.fillText(isEditingValue ? 'DÜZENLEME AÇIK! (Kilitlemek İçin [ A ])' : '[ A ] ile Ayarı Kilitle/Aç | [ X ] Kaydet', 256, 485);
     }
 
     textureMenu.needsUpdate = true;
@@ -373,11 +372,11 @@
     ctxMenu.fillStyle = '#333333';
     ctxMenu.fillRect(90, y, 332, 14);
 
-    ctxMenu.fillStyle = isSelected ? '#ffcc00' : '#00ffcc';
+    ctxMenu.fillStyle = isSelected ? (isEditingValue ? '#ffcc00' : '#00ffcc') : '#00ffcc';
     ctxMenu.fillRect(90, y, percent * 332, 14);
 
     if (isSelected) {
-      ctxMenu.strokeStyle = '#ffffff';
+      ctxMenu.strokeStyle = isEditingValue ? '#ffcc00' : '#ffffff';
       ctxMenu.lineWidth = 2;
       ctxMenu.strokeRect(87, y - 2, 338, 18);
     }
@@ -385,11 +384,11 @@
 
   function drawOptionRow(y, label, isSelected) {
     if (isSelected) {
-      ctxMenu.fillStyle = '#ffcc00';
-      ctxMenu.fillRect(100, y - 18, 312, 26);
+      ctxMenu.fillStyle = isEditingValue ? '#ffcc00' : '#00ffcc';
+      ctxMenu.fillRect(100, y - 18, 312, 24);
       ctxMenu.fillStyle = '#000000';
-      ctxMenu.font = 'bold 16px sans-serif';
-      ctxMenu.fillText('> ' + label + ' <', 256, y);
+      ctxMenu.font = 'bold 15px sans-serif';
+      ctxMenu.fillText(isEditingValue ? '[ DÜZENLENİYOR ] ' + label : '> ' + label + ' <', 256, y);
     } else {
       ctxMenu.fillStyle = '#ffffff';
       ctxMenu.font = '15px sans-serif';
@@ -542,6 +541,12 @@
     }
   }
 
+  function restoreAllHitboxesOpacity() {
+    for (var h = 0; h < hitboxVisuals.length; h++) {
+      hitboxVisuals[h].material.opacity = currentOpacity;
+    }
+  }
+
   function teleportCarToUser() {
     if (!camera || !carMesh) return;
 
@@ -659,10 +664,16 @@
               rotY = hb.rotY;
               rotZ = hb.rotZ;
               activeMode = "HITBOX_COLOR_EDIT";
+              isEditingValue = false;
+              updateMenuTexture();
+            } else if (activeMode === "HITBOX_COLOR_EDIT") {
+              // A Tuşuna Basarak Düzenlemeyi Aç / Kapat Kilit
+              isEditingValue = !isEditingValue;
               updateMenuTexture();
             } else if (activeMode === "CONFIRM_DELETE") {
               removeHitbox(selectedHitboxIndex);
               activeMode = "HITBOX_LIST";
+              restoreAllHitboxesOpacity();
               updateMenuTexture();
             } else if (activeMode === "NONE" && !isMenuOpen) {
               teleportCarToUser(); 
@@ -716,6 +727,7 @@
             if (!isMenuOpen) {
               activeMode = "NONE";
               tempPointMarker.visible = false;
+              restoreAllHitboxesOpacity();
             }
             squareMenuMesh.visible = isMenuOpen;
             updateMenuTexture();
@@ -730,9 +742,11 @@
               else if (selectedMenuIndex === 2) activeMode = "HITBOX_LIST";
             } else if (activeMode === "LEVELING" || activeMode === "HITBOX_LIST") {
               activeMode = "NONE";
+              restoreAllHitboxesOpacity();
             } else if (activeMode === "HITBOX_COLOR_EDIT") {
-              updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
+              updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
               activeMode = "HITBOX_LIST";
+              restoreAllHitboxesOpacity();
             }
             updateMenuTexture();
           }
@@ -763,61 +777,75 @@
               }
             }
             else if (isMenuOpen && activeMode === "HITBOX_COLOR_EDIT") {
-              if (Math.abs(axisY) > 0.6 && !stickNavCooldown) {
-                if (axisY > 0.6) activeSubSelection = Math.min(5, activeSubSelection + 1);
-                if (axisY < -0.6) activeSubSelection = Math.max(0, activeSubSelection - 1);
-                stickNavCooldown = true;
-                updateMenuTexture();
-              } else if (Math.abs(axisY) < 0.2 && Math.abs(axisX) < 0.2) {
-                stickNavCooldown = false;
-              }
+              // Alt/Üst Seçenek Değiştirme (Eğer bir değer kilitli değilse)
+              if (!isEditingValue) {
+                if (Math.abs(axisY) > 0.6 && !stickNavCooldown) {
+                  if (axisY > 0.6) activeSubSelection = Math.min(5, activeSubSelection + 1);
+                  if (axisY < -0.6) activeSubSelection = Math.max(0, activeSubSelection - 1);
+                  stickNavCooldown = true;
+                  updateMenuTexture();
+                } else if (Math.abs(axisY) < 0.2 && Math.abs(axisX) < 0.2) {
+                  stickNavCooldown = false;
+                }
+              } else {
+                // A Tuşu İle Açılan Kilitli Düzenleme Modu
+                if (activeSubSelection === 0 && Math.abs(axisX) > 0.5 && !stickNavCooldown) {
+                  if (axisX > 0.5) selectedColorIndex = (selectedColorIndex + 1) % 9;
+                  if (axisX < -0.5) selectedColorIndex = (selectedColorIndex - 1 + 9) % 9;
+                  stickNavCooldown = true;
+                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
+                  updateMenuTexture();
+                }
 
-              if (activeSubSelection === 0 && Math.abs(axisX) > 0.5 && !stickNavCooldown) {
-                if (axisX > 0.5) selectedColorIndex = (selectedColorIndex + 1) % 9;
-                if (axisX < -0.5) selectedColorIndex = (selectedColorIndex - 1 + 9) % 9;
-                stickNavCooldown = true;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
-                updateMenuTexture();
-              }
+                if (activeSubSelection === 1 && Math.abs(axisX) > 0.1) {
+                  currentOpacity += axisX * 0.01;
+                  if (currentOpacity < 0.1) currentOpacity = 0.1;
+                  if (currentOpacity > 1.0) currentOpacity = 1.0;
+                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
+                  updateMenuTexture();
+                }
 
-              if (activeSubSelection === 1 && Math.abs(axisX) > 0.1) {
-                currentOpacity += axisX * 0.01;
-                if (currentOpacity < 0.1) currentOpacity = 0.1;
-                if (currentOpacity > 1.0) currentOpacity = 1.0;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
-                updateMenuTexture();
-              }
+                if (activeSubSelection === 2 && Math.abs(axisX) > 0.1) {
+                  currentBrightness += axisX * 0.01;
+                  if (currentBrightness < 0.0) currentBrightness = 0.0;
+                  if (currentBrightness > 1.0) currentBrightness = 1.0;
+                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
+                  updateMenuTexture();
+                }
 
-              if (activeSubSelection === 2 && Math.abs(axisX) > 0.1) {
-                currentBrightness += axisX * 0.01;
-                if (currentBrightness < 0.0) currentBrightness = 0.0;
-                if (currentBrightness > 1.0) currentBrightness = 1.0;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
-                updateMenuTexture();
-              }
+                // Eğim X - Hassasiyet yavaşlatıldı ve tam sayı yapıldı
+                if (activeSubSelection === 3 && Math.abs(axisX) > 0.3 && !stickNavCooldown) {
+                  rotX += axisX > 0 ? 1 : -1;
+                  if (rotX < -180) rotX += 360;
+                  if (rotX > 180) rotX -= 360;
+                  stickNavCooldown = true;
+                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                  updateMenuTexture();
+                }
 
-              if (activeSubSelection === 3 && Math.abs(axisX) > 0.1) {
-                rotX += axisX * 1.5;
-                if (rotX < -180) rotX += 360;
-                if (rotX > 180) rotX -= 360;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
-                updateMenuTexture();
-              }
+                // Eğim Y
+                if (activeSubSelection === 4 && Math.abs(axisX) > 0.3 && !stickNavCooldown) {
+                  rotY += axisX > 0 ? 1 : -1;
+                  if (rotY < -180) rotY += 360;
+                  if (rotY > 180) rotY -= 360;
+                  stickNavCooldown = true;
+                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                  updateMenuTexture();
+                }
 
-              if (activeSubSelection === 4 && Math.abs(axisX) > 0.1) {
-                rotY += axisX * 1.5;
-                if (rotY < -180) rotY += 360;
-                if (rotY > 180) rotY -= 360;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
-                updateMenuTexture();
-              }
+                // Eğim Z
+                if (activeSubSelection === 5 && Math.abs(axisX) > 0.3 && !stickNavCooldown) {
+                  rotZ += axisX > 0 ? 1 : -1;
+                  if (rotZ < -180) rotZ += 360;
+                  if (rotZ > 180) rotZ -= 360;
+                  stickNavCooldown = true;
+                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                  updateMenuTexture();
+                }
 
-              if (activeSubSelection === 5 && Math.abs(axisX) > 0.1) {
-                rotZ += axisX * 1.5;
-                if (rotZ < -180) rotZ += 360;
-                if (rotZ > 180) rotZ -= 360;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
-                updateMenuTexture();
+                if (Math.abs(axisX) < 0.2) {
+                  stickNavCooldown = false;
+                }
               }
             }
             else if (isMenuOpen && activeMode === "LEVELING") {
@@ -925,6 +953,7 @@
 
       var effectiveFloorY = FLOOR_Y;
 
+      // 1. DİKEY HITBOX TESPİTİ (Rampa / Yüzey)
       if (hitboxVisuals.length > 0) {
         var rayOrigin = carMesh.position.clone();
         rayOrigin.y += 0.05; 
@@ -937,23 +966,42 @@
             effectiveFloorY = topHit.point.y;
           }
         }
+
+        // 2. YATAY HITBOX ÇARPIŞMA TESPİTİ (Yan Taraf Duvar Engeli)
+        var horizMoveDir = new THREE.Vector3(velocity.x, 0, velocity.z);
+        if (horizMoveDir.lengthSq() > 0.00001) {
+          horizMoveDir.normalize();
+          sideRaycaster.set(carMesh.position, horizMoveDir);
+          var sideIntersects = sideRaycaster.intersectObjects(hitboxVisuals, false);
+          if (sideIntersects.length > 0 && sideIntersects[0].distance < 0.04) {
+            // Hitbox'ın içine girmesin, hızını yatayda kes
+            velocity.x = 0;
+            velocity.z = 0;
+          }
+        }
       }
 
       var currentMinY = effectiveFloorY + carHeightOffset;
       var isGroundedNow = (carMesh.position.y <= currentMinY + 0.002);
 
+      // PLATFORMDAN DÜŞÜŞ - ÇOK YÖNLÜ (ÖN/ARKA/SAĞ/SOL) DEVRİLME
       if (wasGroundedLastFrame && !isGroundedNow && carMesh.position.y > FLOOR_Y + CAR_HEIGHT_UPRIGHT) {
         var forwardVec = new THREE.Vector3(0, 0, currentSpeed).applyQuaternion(carMesh.quaternion);
         velocity.x = forwardVec.x / delta;
         velocity.z = forwardVec.z / delta;
 
+        // Pitch ve Roll eğimlerini hız ve dönüş açısına göre ekle
         var pitchTorque = (currentSpeed < 0 ? -1 : 1) * 3.5; 
+        var rollTorque = turnValue * 4.0; 
+        
         angularVelocity.x = pitchTorque;
+        angularVelocity.z = rollTorque;
         currentSpeed = 0; 
       }
 
       wasGroundedLastFrame = isGroundedNow;
 
+      // HAVADA SÜZÜLME / FIRLATILMA
       if (carMesh.position.y > currentMinY || velocity.y > 0) {
         velocity.y += GRAVITY * delta;
 
@@ -966,38 +1014,40 @@
         carMesh.position.z += velocity.z * delta;
       }
 
+      // ZEMİNE VEYA HITBOX'A İNİŞ / SÜRTÜNEREK DURMA
       if (carMesh.position.y <= currentMinY) {
         carMesh.position.y = currentMinY;
 
         var carEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
 
+        // Yüksek dikey hızda hafif sekme
         if (Math.abs(velocity.y) > BOUNCE_THRESHOLD) {
-          if (Math.abs(carEuler.x) > 0.2) {
-            var flipForce = (carEuler.x > 0 ? 1 : -1) * (Math.abs(velocity.y) * 15.0);
-            angularVelocity.x = flipForce;
-            
-            velocity.y = -velocity.y * BOUNCE_FACTOR;
-            velocity.x *= 0.7;
-            velocity.z *= 0.7;
-          } 
-          else {
-            velocity.y = -velocity.y * BOUNCE_FACTOR;
-            angularVelocity.x = (Math.random() - 0.5) * 3.0;
-            angularVelocity.z = (Math.random() - 0.5) * 3.0;
-            velocity.x *= 0.65;
-            velocity.z *= 0.65;
-          }
-
+          velocity.y = -velocity.y * BOUNCE_FACTOR;
+          velocity.x *= 0.85;
+          velocity.z *= 0.85;
           smoothAlignToFloor(!isUpright, 0.2);
         } 
         else {
           velocity.y = 0;
-          velocity.x *= 0.8;
-          velocity.z *= 0.8;
-          angularVelocity.multiplyScalar(0.2);
+
+          // FIRLATILAN VEYA DÜŞEN HIZIN SÜRTÜNEREK KORUNMASI
+          if (velocity.lengthSq() > 0.00001) {
+            carMesh.position.x += velocity.x * delta;
+            carMesh.position.z += velocity.z * delta;
+
+            // Zemin sürtünmesi ile kademeli yavaşlama
+            velocity.x *= 0.95;
+            velocity.z *= 0.95;
+            angularVelocity.multiplyScalar(0.2);
+
+            if (velocity.length() < 0.01) {
+              velocity.set(0, 0, 0);
+            }
+          }
 
           smoothAlignToFloor(!isUpright, 0.25);
 
+          // NORMAL SÜRÜŞ KONTROLÜ
           if (isUpright && !isMenuOpen) {
             if (isThrottlePressed) {
               if (currentSpeed > MAX_SPEED_FORWARD) {
@@ -1017,11 +1067,8 @@
               if (Math.abs(currentSpeed) < 0.00005) currentSpeed = 0;
             }
 
-            // GÜNCELLENEN DİREKSİYON VE DÖNÜŞ FİZİĞİ:
             if (currentSpeed !== 0 && Math.abs(turnValue) > 0.02) {
               var speedRatio = Math.abs(currentSpeed) / Math.abs(MAX_SPEED_FORWARD);
-              
-              // Araba yavaşladıkça dönüş açısı yumuşatılarak küçültülür
               var effectiveTurn = turnValue * Math.pow(speedRatio, 0.5); 
               var directionMultiplier = currentSpeed < 0 ? 1 : -1;
               
