@@ -78,15 +78,17 @@
   
   var GRAVITY = -9.81;
   var FLOOR_Y = 0.008; 
-  var GRAB_RADIUS = 0.08; // Tutmayı kolaylaştırmak için yarıçapı biraz artırdık
+  var GRAB_RADIUS = 0.08; 
 
-  // Kumandalar & Menü
+  // Kumandalar, Menü & Leveling
   var leftController = null;
   var rightController = null;
   var isSpawnedAtUser = false;
 
   var isMenuOpen = false;
+  var isLevelingMode = false;
   var menuButtonPressedLastFrame = false;
+  var xButtonPressedLastFrame = false;
   var aButtonPressedLastFrame = false;
 
   // 3D Kare Menü Nesneleri
@@ -106,7 +108,7 @@
     var bboxInitial = new THREE.Box3().setFromObject(loadedReverbModel);
     var center = new THREE.Vector3();
     bboxInitial.getCenter(center);
-    loadedReverbModel.position.sub(center); // Modeli pivot merkezine kaydır
+    loadedReverbModel.position.sub(center); 
 
     var wrapperGroup = new THREE.Group();
     wrapperGroup.add(loadedReverbModel);
@@ -167,22 +169,49 @@
     ctxMenu.fillStyle = 'rgba(15, 15, 20, 0.95)';
     ctxMenu.fillRect(0, 0, 512, 512);
 
-    ctxMenu.strokeStyle = '#00ffcc';
-    ctxMenu.lineWidth = 12;
-    ctxMenu.strokeRect(6, 6, 500, 500);
+    if (!isLevelingMode) {
+      // Normal Menü Görünümü
+      ctxMenu.strokeStyle = '#00ffcc';
+      ctxMenu.lineWidth = 12;
+      ctxMenu.strokeRect(6, 6, 500, 500);
 
-    ctxMenu.fillStyle = '#00ffcc';
-    ctxMenu.font = 'bold 48px sans-serif';
-    ctxMenu.textAlign = 'center';
-    ctxMenu.fillText('MENÜ', 256, 120);
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 44px sans-serif';
+      ctxMenu.textAlign = 'center';
+      ctxMenu.fillText('MENÜ', 256, 100);
 
-    ctxMenu.fillStyle = '#ffffff';
-    ctxMenu.font = '32px sans-serif';
-    ctxMenu.fillText('Kapatmak için:', 256, 260);
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = 'bold 30px sans-serif';
+      ctxMenu.fillText('LEVELING (YÜKSEKLİK) İÇİN', 256, 220);
+      
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 44px sans-serif';
+      ctxMenu.fillText('[ X ] TUŞUNA BAS', 256, 290);
 
-    ctxMenu.fillStyle = '#00ffcc';
-    ctxMenu.font = 'bold 40px sans-serif';
-    ctxMenu.fillText('[ Y ] Tuşuna Bas', 256, 340);
+      ctxMenu.fillStyle = '#aaaaaa';
+      ctxMenu.font = '24px sans-serif';
+      ctxMenu.fillText('Kapatmak için: [ Y ] Tuşu', 256, 420);
+    } else {
+      // Leveling Modu Görünümü
+      ctxMenu.strokeStyle = '#ffcc00';
+      ctxMenu.lineWidth = 12;
+      ctxMenu.strokeRect(6, 6, 500, 500);
+
+      ctxMenu.fillStyle = '#ffcc00';
+      ctxMenu.font = 'bold 40px sans-serif';
+      ctxMenu.textAlign = 'center';
+      ctxMenu.fillText('LEVELING MODU', 256, 90);
+
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = '28px sans-serif';
+      ctxMenu.fillText('Sol Stick İle', 256, 180);
+      ctxMenu.fillText('Yüksekliği Ayarla', 256, 220);
+
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 36px sans-serif';
+      ctxMenu.fillText('Kaydet ve Çık:', 256, 330);
+      ctxMenu.fillText('[ X ] TUŞUNA BAS', 256, 390);
+    }
 
     textureMenu.needsUpdate = true;
   }
@@ -251,7 +280,7 @@
     renderer.setAnimationLoop(render);
   }
 
-  // Arabayı oyuncunun önüne düz şekilde ışınlama fonksiyonu
+  // Arabayı oyuncunun önüne düz şekilde ışınlama fonksiyonu (Reset/Teleport)
   function teleportCarToUser() {
     if (!camera || !carMesh) return;
 
@@ -260,20 +289,16 @@
     camera.getWorldPosition(camPos);
     camera.getWorldQuaternion(camQuat);
 
-    // Kameranın baktığı yönü hesapla (Y ekseni hariç)
     var forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camQuat);
     forward.y = 0;
     forward.normalize();
 
-    // Arabayı oyuncunun 0.5 metre önüne yerleştir
     carMesh.position.copy(camPos).add(forward.clone().multiplyScalar(0.5));
     carMesh.position.y = FLOOR_Y + 0.015;
 
-    // Arabayı oyuncuya bakacak şekilde döndür ve düzelt
     var angle = Math.atan2(forward.x, forward.z);
     carMesh.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle + Math.PI);
 
-    // Hız ve fizikleri sıfırla
     velocity.set(0, 0, 0);
     angularVelocity.set(0, 0, 0);
     currentSpeed = 0;
@@ -316,32 +341,56 @@
         if (source.handedness === 'right') {
           if (btns[0] && btns[0].value > 0.1) {
             rightTriggerPressed = true;
-            if (!activeGrabber && !isMenuOpen) isThrottlePressed = true;
+            if (!activeGrabber && !isMenuOpen && !isLevelingMode) isThrottlePressed = true;
           }
           if (btns[1] && btns[1].value > 0.1) {
-            if (!activeGrabber && !isMenuOpen) isBrakePressed = true;
+            if (!activeGrabber && !isMenuOpen && !isLevelingMode) isBrakePressed = true;
           }
 
           // A Tuşu Kontrolü (buttons[4] -> Sağ Kumanda A Tuşu)
           var aBtnPressed = (btns[4] && btns[4].pressed);
           if (aBtnPressed && !aButtonPressedLastFrame) {
-            teleportCarToUser(); // Arabayı oyuncunun önüne düz biçimde ışınla
+            teleportCarToUser(); 
           }
           aButtonPressedLastFrame = aBtnPressed;
         }
 
-        // SOL KUMANDA (3: Y Tuşu)
+        // SOL KUMANDA (4: X Tuşu, 5: Y Tuşu)
         if (source.handedness === 'left') {
           var axes = source.gamepad.axes;
 
-          var yBtnPressed = (btns[3] && btns[3].pressed);
+          // 1. Y Tuşu (buttons[5] -> Sol Kumandadaki Y Tuşu) ile Menü Aç / Kapat
+          var yBtnPressed = (btns[5] && btns[5].pressed);
           if (yBtnPressed && !menuButtonPressedLastFrame) {
             isMenuOpen = !isMenuOpen;
+            if (!isMenuOpen) {
+              isLevelingMode = false;
+            }
             squareMenuMesh.visible = isMenuOpen;
+            updateMenuTexture();
           }
           menuButtonPressedLastFrame = yBtnPressed;
 
-          if (!isMenuOpen && axes && axes.length > 0) {
+          // 2. X Tuşu (buttons[4] -> Sol Kumandadaki X Tuşu) ile Leveling Modu Aç / Kapat
+          var xBtnPressed = (btns[4] && btns[4].pressed);
+          if (xBtnPressed && !xButtonPressedLastFrame && isMenuOpen) {
+            isLevelingMode = !isLevelingMode; 
+            updateMenuTexture();
+          }
+          xButtonPressedLastFrame = xBtnPressed;
+
+          // 3. Leveling Modunda Yükseklik Ayarı (Sol Stick Y Ekseni)
+          if (isLevelingMode && axes && axes.length > 1) {
+            var axisY = axes.length >= 4 ? axes[3] : axes[1];
+            if (Math.abs(axisY) > 0.1) {
+              FLOOR_Y -= axisY * 0.002; 
+              if (!activeGrabber) {
+                carMesh.position.y = FLOOR_Y + 0.015;
+              }
+            }
+          } 
+          // 4. Normal Direksiyon Kontrolü
+          else if (!isMenuOpen && axes && axes.length > 0) {
             var axisX = axes.length >= 4 ? axes[2] : axes[0];
             if (Math.abs(axisX) > 0.05) {
               turnValue = axisX;
@@ -444,7 +493,7 @@
       var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
       var isUprightAndOnGround = upVector.y > 0.65;
 
-      if (carMesh.position.y <= minGroundY + 0.005 && isUprightAndOnGround && !isMenuOpen) {
+      if (carMesh.position.y <= minGroundY + 0.005 && isUprightAndOnGround && !isMenuOpen && !isLevelingMode) {
         if (isThrottlePressed) {
           if (currentSpeed > MAX_SPEED_FORWARD) {
             currentSpeed -= ACCEL;
