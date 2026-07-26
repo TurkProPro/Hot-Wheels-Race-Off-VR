@@ -65,7 +65,7 @@
   var isBrakePressed = false;
   var turnValue = 0;
 
-  // Fizik & Sekme Değişkenleri (Gerçekçi Hiyerarşi)
+  // Fizik & Sekme Değişkenleri
   var activeGrabber = null; 
   var isJustGrabbed = false;
 
@@ -80,9 +80,8 @@
   var CAR_HEIGHT_UPRIGHT = 0.012; 
   var CAR_HEIGHT_UPSIDEDOWN = 0.010; 
   
-  // Hassas fizik ayarları
-  var BOUNCE_FACTOR = 0.40;       // Yere çarpma enerjisinin korunan miktarı
-  var BOUNCE_THRESHOLD = 0.25;    // Bu dikey hızın üstündeyse sekmeye devam eder
+  var BOUNCE_FACTOR = 0.35;       
+  var BOUNCE_THRESHOLD = 0.25;    
   var GRAB_RADIUS = 0.12; 
 
   // Kumandalar (Dinamik)
@@ -299,15 +298,11 @@
     activeGrabber = null;
   }
 
-  // Arabayı yere çakılmadan yumuşakça (Smooth) hizalayan fonksiyon
   function smoothAlignToFloor(isUpsideDown, factor) {
     var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
-    
-    // Hedef açı: Yön (Yaw) açısını koru, Pitch ve Roll açılarını zemine düzle
     var targetEuler = new THREE.Euler(0, currentEuler.y, isUpsideDown ? Math.PI : 0, 'YXZ');
     var targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
 
-    // Slerp ile yumuşak geçiş sağla
     carMesh.quaternion.slerp(targetQuat, factor);
   }
 
@@ -493,60 +488,84 @@
         carMesh.position.z += velocity.z * delta;
       }
 
-      // ZEMİN KONTROLÜ VE DİNAMİK SEKME
+      // ZEMİN KONTROLÜ VE ÖZEL TERS DÖNME (SPIN) FİZİĞİ
       if (carMesh.position.y <= currentMinY) {
         carMesh.position.y = currentMinY;
 
-        // Düşüş hızı yüksekse sekme başlat
+        // Düşüş hızı eşiğin üzerindeyse
         if (Math.abs(velocity.y) > BOUNCE_THRESHOLD) {
-          velocity.y = -velocity.y * BOUNCE_FACTOR; // Hıza bağlı sekme yüksekliği
-          velocity.x *= 0.65;
-          velocity.z *= 0.65;
+          
+          if (!isUpright) {
+            // TERS DÜŞTÜĞÜNDE: Videodaki topaç gibi kendi etrafında dönme etkisi
+            var spinDirection = (Math.random() > 0.5 ? 1 : -1);
+            angularVelocity.y = spinDirection * (Math.abs(velocity.y) * 12.0); // Düşüş hızı kadar tork al
+            angularVelocity.x = (Math.random() - 0.5) * 1.5;
+            angularVelocity.z = (Math.random() - 0.5) * 1.5;
+            
+            velocity.y = -velocity.y * (BOUNCE_FACTOR * 0.5); // Ters düşüşte sekme az olur
+          } else {
+            // DÜZ DÜŞTÜĞÜNDE: Normal sekme
+            velocity.y = -velocity.y * BOUNCE_FACTOR;
+            angularVelocity.x = (Math.random() - 0.5) * 2.0;
+            angularVelocity.z = (Math.random() - 0.5) * 2.0;
+          }
 
-          // Çarpışma anında hafif rastgele yalpalama
-          angularVelocity.x = (Math.random() - 0.5) * 3.0;
-          angularVelocity.z = (Math.random() - 0.5) * 3.0;
+          velocity.x *= 0.6;
+          velocity.z *= 0.6;
+          smoothAlignToFloor(!isUpright, 0.3);
 
-          // Sekme anında zemine doğru yumuşak açısal hizalanma
-          smoothAlignToFloor(!isUpright, 0.25);
         } 
-        // Sekme hızı tükendiyse zemine oturma aşaması
+        // Yere oturduğunda (Sönümlenme)
         else {
           velocity.y = 0;
-          angularVelocity.multiplyScalar(0.1); // Dönüş ivmesini sönümle
-          velocity.x *= 0.8;
-          velocity.z *= 0.8;
 
-          // Zemine tamamen yumuşakça (Lerp/Slerp) kilitlen
-          smoothAlignToFloor(!isUpright, 0.2);
+          if (!isUpright) {
+            // Ters konumdayken kendi etrafında dönmeye (Spin) devam et ve yavaşça dur
+            carMesh.rotation.y += angularVelocity.y * delta;
+            angularVelocity.y *= 0.93; // Yüzey sürtünmesi (sönümlenme)
+            
+            angularVelocity.x = 0;
+            angularVelocity.z = 0;
+            velocity.x *= 0.85;
+            velocity.z *= 0.85;
 
-          if (isUpright && !isMenuOpen && !isLevelingMode) {
-            if (isThrottlePressed) {
-              if (currentSpeed > MAX_SPEED_FORWARD) {
-                currentSpeed -= ACCEL;
-              }
-            } 
-            else if (isBrakePressed) {
-              if (currentSpeed < -0.0005) {
-                currentSpeed *= BRAKE_FORCE; 
-              } 
-              else if (currentSpeed < MAX_SPEED_BACKWARD) {
-                currentSpeed += ACCEL * 0.6; 
-              }
-            } 
-            else {
-              currentSpeed *= FRICTION;
-              if (Math.abs(currentSpeed) < 0.00005) currentSpeed = 0;
-            }
-
-            if (currentSpeed !== 0 && Math.abs(turnValue) > 0.05) {
-              var directionMultiplier = currentSpeed < 0 ? 1 : -1;
-              carMesh.rotateY(-turnValue * 0.05 * directionMultiplier);
-            }
-
-            carMesh.translateZ(currentSpeed);
+            smoothAlignToFloor(true, 0.2);
           } else {
-            currentSpeed = 0;
+            // Düz konumdayken sürtünmeyle dur ve sürüşe hazır ol
+            angularVelocity.set(0, 0, 0);
+            velocity.x *= 0.8;
+            velocity.z *= 0.8;
+
+            smoothAlignToFloor(false, 0.2);
+
+            if (!isMenuOpen && !isLevelingMode) {
+              if (isThrottlePressed) {
+                if (currentSpeed > MAX_SPEED_FORWARD) {
+                  currentSpeed -= ACCEL;
+                }
+              } 
+              else if (isBrakePressed) {
+                if (currentSpeed < -0.0005) {
+                  currentSpeed *= BRAKE_FORCE; 
+                } 
+                else if (currentSpeed < MAX_SPEED_BACKWARD) {
+                  currentSpeed += ACCEL * 0.6; 
+                }
+              } 
+              else {
+                currentSpeed *= FRICTION;
+                if (Math.abs(currentSpeed) < 0.00005) currentSpeed = 0;
+              }
+
+              if (currentSpeed !== 0 && Math.abs(turnValue) > 0.05) {
+                var directionMultiplier = currentSpeed < 0 ? 1 : -1;
+                carMesh.rotateY(-turnValue * 0.05 * directionMultiplier);
+              }
+
+              carMesh.translateZ(currentSpeed);
+            } else {
+              currentSpeed = 0;
+            }
           }
         }
       }
