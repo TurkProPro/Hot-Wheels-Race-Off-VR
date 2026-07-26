@@ -65,7 +65,7 @@
   var isBrakePressed = false;
   var turnValue = 0;
 
-  // Fizik & Sekme
+  // Fizik & Sekme Değişkenleri
   var activeGrabber = null; 
   var isJustGrabbed = false;
 
@@ -79,8 +79,8 @@
   var FLOOR_Y = 0.0; 
   var CAR_HEIGHT_UPRIGHT = 0.012; 
   var CAR_HEIGHT_UPSIDEDOWN = 0.010; 
-  var BOUNCE_FACTOR = 0.38;       // Yere vurunca sekme katsayısı
-  var BOUNCE_THRESHOLD = 0.35;    // Min sekme hızı
+  var BOUNCE_FACTOR = 0.35;       
+  var BOUNCE_THRESHOLD = 0.30;    
   var GRAB_RADIUS = 0.10; 
 
   // Kumandalar, Menü & Leveling
@@ -296,6 +296,17 @@
     activeGrabber = null;
   }
 
+  // Arabayı zemine tam paralel oturtma fonksiyonu
+  function alignCarToFloor(isUpsideDown) {
+    var euler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
+    
+    // Pitch ve Roll açılarını sıfırla (eğimi bitir), sadece Y (yaw) dönme açısını koru
+    euler.x = 0;
+    euler.z = isUpsideDown ? Math.PI : 0; // Tavan üstündeyse 180 derece ters bas
+    
+    carMesh.quaternion.setFromEuler(euler);
+  }
+
   var lastTime = performance.now();
 
   function render(time, frame) {
@@ -443,17 +454,14 @@
     } 
     else {
       var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
-      var isUpright = upVector.y > 0.5;
-      var isUpsideDown = upVector.y < -0.5;
+      var isUpright = upVector.y > 0; // Yukarı bakıyorsa düz kabul et, yoksa ters
+      var currentMinY = isUpright ? (FLOOR_Y + CAR_HEIGHT_UPRIGHT) : (FLOOR_Y + CAR_HEIGHT_UPSIDEDOWN);
 
-      var currentMinY = FLOOR_Y + CAR_HEIGHT_UPRIGHT;
-      if (isUpsideDown) {
-        currentMinY = FLOOR_Y + CAR_HEIGHT_UPSIDEDOWN;
-      }
-
+      // SERBEST DÜŞÜŞ MANTIĞI
       if (carMesh.position.y > currentMinY || velocity.y > 0) {
         velocity.y += GRAVITY * delta;
 
+        // Havada takla/açısal dönüş
         carMesh.rotation.x += angularVelocity.x * delta;
         carMesh.rotation.y += angularVelocity.y * delta;
         carMesh.rotation.z += angularVelocity.z * delta;
@@ -463,21 +471,29 @@
         carMesh.position.z += velocity.z * delta;
       }
 
+      // ZEMİNE ÇARPIŞMA VEYA TEMAS HİZALAMASI
       if (carMesh.position.y <= currentMinY) {
         carMesh.position.y = currentMinY;
 
+        // Sekme Alanı
         if (Math.abs(velocity.y) > BOUNCE_THRESHOLD) {
           velocity.y = -velocity.y * BOUNCE_FACTOR;
-          velocity.x *= 0.7;
-          velocity.z *= 0.7;
+          velocity.x *= 0.6;
+          velocity.z *= 0.6;
 
-          angularVelocity.x = (Math.random() - 0.5) * 8.0;
-          angularVelocity.z = (Math.random() - 0.5) * 8.0;
-        } else {
+          // Çarpışmanın yarattığı hafif yalpalama
+          angularVelocity.x = (Math.random() - 0.5) * 4.0;
+          angularVelocity.z = (Math.random() - 0.5) * 4.0;
+        } 
+        // Yere tam oturma anı
+        else {
           velocity.y = 0;
-          angularVelocity.multiplyScalar(0.1);
+          angularVelocity.set(0, 0, 0); // Dönme ivmesini tamamen durdur
           velocity.x *= 0.8;
           velocity.z *= 0.8;
+
+          // ZEMİNE PARALEL HİZALA (Tekerleklerin veya Tavanın Üstüne Tam Oturt)
+          alignCarToFloor(!isUpright);
 
           if (isUpright && !isMenuOpen && !isLevelingMode) {
             if (isThrottlePressed) {
