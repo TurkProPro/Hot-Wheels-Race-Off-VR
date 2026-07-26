@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb (Advanced Physics)</title>
+  <title>Hot Wheels MR - Acceleracers Reverb</title>
   <style>
     body {
       margin: 0;
@@ -36,7 +36,6 @@
       transform: translateX(-50%);
       font-size: 18px;
       color: #00ffcc;
-      display: none;
       z-index: 9999;
     }
   </style>
@@ -47,20 +46,21 @@
 </head>
 <body>
 
-  <button id="start-btn">HOT WHEELS MR'I BAŞLAT</button>
-  <div id="loading-text">Model Yükleniyor...</div>
+  <button id="start-btn" style="display:none;">HOT WHEELS MR'I BAŞLAT</button>
+  <div id="loading-text">Model Arka Planda Yükleniyor...</div>
 
 <script>
   var scene, camera, renderer;
   var carMesh; 
+  var loadedReverbModel = null; // Önceden yüklenmiş model deposu
 
-  // Sürüş & İvmelenme Değişkenleri
+  // Sürüş Değişkenleri
   var currentSpeed = 0;
-  var MAX_SPEED_FORWARD = -0.012; // Maksimum İleri Hız
-  var MAX_SPEED_BACKWARD = 0.006;  // Maksimum Geri Hız
-  var ACCEL = 0.0003;             // İvmelenme Hızı
-  var FRICTION = 0.96;            // Doğal Sürtünme (Tetik bırakılınca)
-  var BRAKE_FORCE = 0.88;         // Grip ile Hızlı Frenleme Gücü
+  var MAX_SPEED_FORWARD = -0.012; 
+  var MAX_SPEED_BACKWARD = 0.006;  
+  var ACCEL = 0.0003;             
+  var FRICTION = 0.96;            
+  var BRAKE_FORCE = 0.88;         
 
   var isThrottlePressed = false;
   var isBrakePressed = false;
@@ -87,6 +87,53 @@
   var startBtn = document.getElementById('start-btn');
   var loadingText = document.getElementById('loading-text');
 
+  // --- 1. MODELİ SAYFA AÇILIR AÇILMAZ ÖNDEN YÜKLE ---
+  var loader = new THREE.GLTFLoader();
+
+  // NOT: Lütfen sunucudaki .glb dosya adının tam olarak 'car_model.glb' olduğundan emin ol.
+  loader.load('./car_model.glb', function(gltf) {
+    loadedReverbModel = gltf.scene;
+
+    // Eksen Hizalama
+    loadedReverbModel.rotation.y = Math.PI / 2;
+
+    // Boyutlandırma (Hot Wheels: 7cm)
+    var bboxInitial = new THREE.Box3().setFromObject(loadedReverbModel);
+    var currentLength = bboxInitial.max.z - bboxInitial.min.z;
+    if ((bboxInitial.max.x - bboxInitial.min.x) > currentLength) {
+      currentLength = bboxInitial.max.x - bboxInitial.min.x;
+    }
+
+    var targetLength = 0.07; 
+    var targetScale = targetLength / currentLength;
+    loadedReverbModel.scale.set(targetScale, targetScale, targetScale);
+
+    loadedReverbModel.traverse(function(child) {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+
+    var bboxFinal = new THREE.Box3().setFromObject(loadedReverbModel);
+    loadedReverbModel.position.y = -bboxFinal.min.y - 0.01; 
+
+    // Yükleme Tamamlandı, Butonu Göster
+    loadingText.style.display = 'none';
+    startBtn.style.display = 'block';
+
+  }, function(xhr) {
+    if (xhr.total > 0) {
+      var percent = Math.round((xhr.loaded / xhr.total) * 100);
+      loadingText.innerText = 'Model Hazırlanıyor... %' + percent;
+    }
+  }, function(error) {
+    console.error('GLB Yükleme Hatası:', error);
+    loadingText.style.color = '#ff3366';
+    loadingText.innerText = 'HATA: "car_model.glb" dosyası bulunamadı! Dosya adını ve yerini kontrol edin.';
+  });
+
+  // --- 2. WEBXR OTURUMUNU BAŞLAT ---
   startBtn.addEventListener('click', function() {
     if (!navigator.xr) {
       alert('WebXR desteklenmiyor!');
@@ -136,49 +183,10 @@
     carMesh.position.set(0, FLOOR_Y, -0.4);
     scene.add(carMesh);
 
-    // GLTF / GLB YÜKLEYİCİ
-    loadingText.style.display = 'block';
-    var loader = new THREE.GLTFLoader();
-
-    loader.load('car_model.glb', function(gltf) {
-      var reverbModel = gltf.scene;
-
-      // Eksen hizalama
-      reverbModel.rotation.y = Math.PI / 2;
-
-      // Boyutlandırma (Hot Wheels: 7cm)
-      var bboxInitial = new THREE.Box3().setFromObject(reverbModel);
-      var currentLength = bboxInitial.max.z - bboxInitial.min.z;
-      if ((bboxInitial.max.x - bboxInitial.min.x) > currentLength) {
-        currentLength = bboxInitial.max.x - bboxInitial.min.x;
-      }
-
-      var targetLength = 0.07; 
-      var targetScale = targetLength / currentLength;
-      reverbModel.scale.set(targetScale, targetScale, targetScale);
-
-      reverbModel.traverse(function(child) {
-        if (child.isMesh) {
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-
-      var bboxFinal = new THREE.Box3().setFromObject(reverbModel);
-      reverbModel.position.y = -bboxFinal.min.y - 0.01; 
-
-      carMesh.add(reverbModel);
-      loadingText.style.display = 'none';
-
-    }, function(xhr) {
-      if (xhr.total > 0) {
-        var percent = Math.round((xhr.loaded / xhr.total) * 100);
-        loadingText.innerText = 'Araba Yükleniyor... %' + percent;
-      }
-    }, function(error) {
-      console.error('GLB yüklenirken hata:', error);
-      loadingText.innerText = 'GLB Yüklenemedi! Dosya adını kontrol edin.';
-    });
+    // Önceden yüklenen modeli doğrudan Hitbox'a ekle
+    if (loadedReverbModel) {
+      carMesh.add(loadedReverbModel);
+    }
 
     // Kumandalar
     leftController = renderer.xr.getController(0);
@@ -223,12 +231,10 @@
 
         // Sağ Kumanda (Gaz = Trigger / Fren & Geri = Grip)
         if (source.handedness === 'right') {
-          // Trigger (Button 0) - Gaz
           if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
             rightTriggerPressed = true;
             if (!activeGrabber) isThrottlePressed = true;
           }
-          // Grip (Button 1) - Fren / Geri Vites
           if (source.gamepad.buttons[1] && source.gamepad.buttons[1].value > 0.1) {
             if (!activeGrabber) isBrakePressed = true;
           }
@@ -312,7 +318,6 @@
     } 
     // SERBEST DÜŞÜŞ VE FİZİK
     else {
-      // 1. HAVADAYSA
       if (carMesh.position.y > FLOOR_Y) {
         velocity.y += GRAVITY * delta;
 
@@ -325,27 +330,23 @@
       carMesh.position.y += velocity.y * delta;
       carMesh.position.z += velocity.z * delta;
 
-      // 2. ZEMİNE ÇARPMA VE 4 YÖNLÜ DÜŞME FİZİĞİ (Düz, Ters, Sağ Yan, Sol Yan)
       if (carMesh.position.y <= FLOOR_Y) {
         carMesh.position.y = FLOOR_Y;
         velocity.y = 0;
 
         angularVelocity.multiplyScalar(0.05);
 
-        // Aracın Yön Vektörlerini Hesaplanması
         var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
         var rightVector = new THREE.Vector3(1, 0, 0).applyQuaternion(carMesh.quaternion);
 
         var targetRoll = 0;
         var targetPitch = 0;
 
-        // Yana Yatış Analizi (Sağ / Sol Yan)
         if (Math.abs(rightVector.y) > 0.6) {
-          targetRoll = rightVector.y > 0 ? -Math.PI / 2 : Math.PI / 2; // Sağ veya Sol Yan
+          targetRoll = rightVector.y > 0 ? -Math.PI / 2 : Math.PI / 2; 
         } 
-        // Düz veya Ters Yatış Analizi
         else if (upVector.y < 0) {
-          targetRoll = Math.PI; // Tavan Üstü Ters
+          targetRoll = Math.PI; 
         }
 
         var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
@@ -358,39 +359,29 @@
         velocity.z *= 0.8;
       }
 
-      // 3. SÜRÜŞ VE İVMELENME DİNAMİKLERİ
       var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
-      
-      // Sadece araç DÜZ durumdayken (Tekerlekler yerdeyken) sürüş aktif
       var isUprightAndOnGround = upVector.y > 0.65;
 
       if (carMesh.position.y <= FLOOR_Y + 0.005 && isUprightAndOnGround) {
         
-        // --- GAZ (Trigger) MANTIĞI ---
         if (isThrottlePressed) {
-          // İleri doğru kademeli ivmelenme
           if (currentSpeed > MAX_SPEED_FORWARD) {
             currentSpeed -= ACCEL;
           }
         } 
-        // --- FREN & GERİ (Grip) MANTIĞI ---
         else if (isBrakePressed) {
-          // Eğer araç ileri gidiyorsa HIZLI FREN yap
           if (currentSpeed < -0.0005) {
             currentSpeed *= BRAKE_FORCE; 
           } 
-          // Araç durduysa GERİ gitmeye başla
           else if (currentSpeed < MAX_SPEED_BACKWARD) {
-            currentSpeed += ACCEL * 0.6; // Geri vites biraz daha yavaş ivmelenir
+            currentSpeed += ACCEL * 0.6; 
           }
         } 
-        // --- TETİK BIRAKILDIĞINDA DOĞAL SÜRTÜNME ---
         else {
           currentSpeed *= FRICTION;
           if (Math.abs(currentSpeed) < 0.00005) currentSpeed = 0;
         }
 
-        // --- DİREKSİYON ---
         if (currentSpeed !== 0 && Math.abs(turnValue) > 0.05) {
           var directionMultiplier = currentSpeed < 0 ? 1 : -1;
           carMesh.rotateY(-turnValue * 0.05 * directionMultiplier);
@@ -398,7 +389,6 @@
 
         carMesh.translateZ(currentSpeed);
       } else {
-        // Havada veya Yan/Ters duruyorsa tekerlekler boşa döner, ivme sıfırlanır
         currentSpeed = 0;
       }
     }
