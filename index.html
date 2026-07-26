@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - 4-Point Hitbox & Physics Update</title>
+  <title>Hot Wheels MR - 2-Point Preview & Repeat Physics Fix</title>
   <style>
     body {
       margin: 0;
@@ -87,10 +87,7 @@
   var GRAB_RADIUS = 0.12; 
 
   var downRaycaster = new THREE.Raycaster();
-  var sideRaycasters = [
-    new THREE.Raycaster(), new THREE.Raycaster(), 
-    new THREE.Raycaster(), new THREE.Raycaster()
-  ];
+  var sideRaycaster = new THREE.Raycaster();
 
   // Kumandalar
   var controller0 = null;
@@ -109,16 +106,16 @@
   var aButtonPressedLastFrame = false;
   var bButtonPressedLastFrame = false;
   var rightTriggerPressedLastFrame = false;
-  var stickNavCooldown = false;
 
   var squareMenuMesh;
   var canvasMenu, ctxMenu, textureMenu;
 
-  // 4 NOKTALI HITBOX DEĞİŞKENLERİ
+  // 2 NOKTALI PREVIEW HITBOX DEĞİŞKENLERİ
   var customHitboxes = []; 
   var hitboxVisuals = [];  
-  var point1 = null, point2 = null, point3 = null, point4 = null;
-  var pointMarkers = []; 
+  var point1 = null; 
+  var previewBoxMesh = null; 
+  var pointMarkers = [];
 
   var selectedHitboxIndex = 0; 
   var selectedColorIndex = 0;  
@@ -128,6 +125,36 @@
 
   var activeSubSelection = 0;  
   var isEditingValue = false; 
+
+  // Auto-repeat (Basılı Tutma) Zamanlayıcıları
+  var repeatTimers = {};
+
+  function checkAutoRepeat(key, isPressed, initialDelayMs, repeatRateMs, callback) {
+    var now = performance.now();
+    if (isPressed) {
+      if (!repeatTimers[key]) {
+        repeatTimers[key] = { lastTime: now, startTime: now, initialTriggered: false };
+        callback();
+      } else {
+        var timer = repeatTimers[key];
+        var elapsed = now - timer.startTime;
+        if (!timer.initialTriggered) {
+          if (elapsed >= initialDelayMs) {
+            timer.initialTriggered = true;
+            timer.lastTime = now;
+            callback();
+          }
+        } else {
+          if (now - timer.lastTime >= repeatRateMs) {
+            timer.lastTime = now;
+            callback();
+          }
+        }
+      }
+    } else {
+      delete repeatTimers[key];
+    }
+  }
 
   var rainbowPalette = [
     { name: "Gri (Default)", hex: 0x888888, str: "#888888" },
@@ -221,7 +248,7 @@
     ctxMenu.fillText('AYARLAR MENÜSÜ', 256, 45);
 
     if (activeMode === "NONE") {
-      var items = ["1. Zemin Yüksekliği", "2. Kutu (4 Noktalı Hitbox) Ekle", "3. Kutu (Hitbox) Düzenle"];
+      var items = ["1. Zemin Yüksekliği", "2. Kutu (Hitbox) Ekle (Önizlemeli)", "3. Kutu (Hitbox) Düzenle"];
       for (var i = 0; i < 3; i++) {
         var yPos = 120 + (i * 90);
         if (selectedMenuIndex === i) {
@@ -250,49 +277,26 @@
       ctxMenu.fillStyle = '#00ffcc';
       ctxMenu.fillText('Kaydet ve Çık: [ X ]', 256, 330);
 
-    } else if (activeMode === "HITBOX_P1") {
+    } else if (activeMode === "HITBOX_BUILD") {
       ctxMenu.fillStyle = '#00ffcc';
       ctxMenu.font = 'bold 28px sans-serif';
-      ctxMenu.fillText('HITBOX: 1. ANA NOKTA (Orijin)', 256, 110);
+      ctxMenu.fillText('2 NOKTALI CANLI HITBOX', 256, 110);
       ctxMenu.fillStyle = '#ffffff';
       ctxMenu.font = '22px sans-serif';
-      ctxMenu.fillText('1. Sağ Trigger ile Başlangıç Koy', 256, 180);
-      ctxMenu.fillText('2. Sol Stick: X/Z Kaydır', 256, 220);
-      ctxMenu.fillText('3. Sağ Stick: Yüksekliği Ayarla', 256, 260);
-      ctxMenu.fillStyle = '#ffcc00';
-      ctxMenu.fillText('Onayla: [ A ]', 256, 340);
 
-    } else if (activeMode === "HITBOX_P2") {
-      ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 28px sans-serif';
-      ctxMenu.fillText('HITBOX: 2. NOKTA (X Ekseni)', 256, 110);
-      ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = '22px sans-serif';
-      ctxMenu.fillText('Genişlik Yönünü Belirle', 256, 180);
-      ctxMenu.fillText('Sağ Trigger: Nokta Koy', 256, 220);
-      ctxMenu.fillStyle = '#ffcc00';
-      ctxMenu.fillText('Onayla: [ A ]', 256, 340);
+      if (!point1) {
+        ctxMenu.fillText('1. Nokta İçin Sağ Trigger\'a Bas', 256, 200);
+      } else {
+        ctxMenu.fillStyle = '#00ff00';
+        ctxMenu.fillText('ÖNİZLEME AKTİF!', 256, 180);
+        ctxMenu.fillStyle = '#ffffff';
+        ctxMenu.fillText('Sağ Kumandayı Hareket Ettir', 256, 220);
+        ctxMenu.fillText('Kutuyu Kesinleştir: [ A ]', 256, 260);
+      }
 
-    } else if (activeMode === "HITBOX_P3") {
-      ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 28px sans-serif';
-      ctxMenu.fillText('HITBOX: 3. NOKTA (Z Ekseni - 90°)', 256, 110);
-      ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = '22px sans-serif';
-      ctxMenu.fillText('Uzunluk Yönünü Belirle', 256, 180);
-      ctxMenu.fillText('(X Eksenine Otomatik 90° Dikleşir)', 256, 220);
-      ctxMenu.fillStyle = '#ffcc00';
-      ctxMenu.fillText('Onayla: [ A ]', 256, 340);
-
-    } else if (activeMode === "HITBOX_P4") {
-      ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 28px sans-serif';
-      ctxMenu.fillText('HITBOX: 4. NOKTA (Yüksekliği Y Ekseni)', 256, 110);
-      ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = '22px sans-serif';
-      ctxMenu.fillText('Yüksekliği Belirle', 256, 180);
-      ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.fillText('Kutuyu Oluştur: [ A ]', 256, 340);
+      ctxMenu.fillStyle = '#aaaaaa';
+      ctxMenu.font = '18px sans-serif';
+      ctxMenu.fillText('İptal Etmek İçin: [ X ]', 256, 370);
 
     } else if (activeMode === "HITBOX_LIST") {
       ctxMenu.fillStyle = '#00ffcc';
@@ -380,7 +384,7 @@
 
       ctxMenu.fillStyle = isEditingValue ? '#ffcc00' : '#00ffcc';
       ctxMenu.font = '15px sans-serif';
-      ctxMenu.fillText(isEditingValue ? 'DÜZENLEME AÇIK! (Kilitlemek İçin [ A ])' : '[ A ] ile Ayarı Kilitle/Aç | [ X ] Kaydet', 256, 485);
+      ctxMenu.fillText(isEditingValue ? 'DÜZENLEME AÇIK! (Basılı Tutabilirsiniz)' : '[ A ] ile Ayarı Kilitle/Aç | [ X ] Kaydet', 256, 485);
     }
 
     textureMenu.needsUpdate = true;
@@ -410,7 +414,7 @@
       ctxMenu.fillRect(100, y - 18, 312, 24);
       ctxMenu.fillStyle = '#000000';
       ctxMenu.font = 'bold 15px sans-serif';
-      ctxMenu.fillText(isEditingValue ? '[ DÜZENLENİYOR ] ' + label : '> ' + label + ' <', 256, y);
+      ctxMenu.fillText(isEditingValue ? '[ BASILI TUTULABİLİR ] ' + label : '> ' + label + ' <', 256, y);
     } else {
       ctxMenu.fillStyle = '#ffffff';
       ctxMenu.font = '15px sans-serif';
@@ -451,8 +455,26 @@
       carMesh.add(loadedReverbModel);
     }
 
-    // 4 Nokta Bitiş Markerları (Sarı Noktalar)
-    for (var m = 0; m < 4; m++) {
+    // Önizleme Kutusu (Preview Box Mesh)
+    var prevGeo = new THREE.BoxGeometry(1, 1, 1);
+    var prevMat = new THREE.MeshStandardMaterial({
+      color: 0x00ff00,
+      emissive: 0x00ff00,
+      emissiveIntensity: 0.4,
+      transparent: true,
+      opacity: 0.4,
+      wireframe: false
+    });
+    previewBoxMesh = new THREE.Mesh(prevGeo, prevMat);
+    previewBoxMesh.visible = false;
+
+    var edges = new THREE.EdgesGeometry(prevGeo);
+    var line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ff00 }));
+    previewBoxMesh.add(line);
+    scene.add(previewBoxMesh);
+
+    // Markerlar
+    for (var m = 0; m < 2; m++) {
       var pointGeo = new THREE.SphereGeometry(0.012, 16, 16);
       var pointMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
       var markerMesh = new THREE.Mesh(pointGeo, pointMat);
@@ -486,31 +508,39 @@
     renderer.setAnimationLoop(render);
   }
 
-  // 4 NOKTADAN HESAPLANAN DİK (ORTHOGONAL) ORIENTED HITBOX OLUŞTURMA
-  function create4PointHitbox(p1, p2, p3, p4) {
-    // 1. X Eksen Vektörü (P1 -> P2)
-    var vX = new THREE.Vector3().subVectors(p2, p1);
-    var sizeX = vX.length();
-    if (sizeX < 0.01) sizeX = 0.01;
-    vX.normalize();
+  function updatePreviewBox(p1, currentP2) {
+    if (!p1 || !currentP2) return;
 
-    // 2. Z Eksen Vektörü (P1 -> P3) X Eksenine 90 Derece Dikleştirme
-    var vZ_raw = new THREE.Vector3().subVectors(p3, p1);
-    var projX = vX.clone().multiplyScalar(vZ_raw.dot(vX));
-    var vZ = vZ_raw.sub(projX); // X bileşenini çıkararak 90 derece dik yaptık
-    var sizeZ = vZ.length();
-    if (sizeZ < 0.01) sizeZ = 0.01;
-    vZ.normalize();
+    var minX = Math.min(p1.x, currentP2.x);
+    var maxX = Math.max(p1.x, currentP2.x);
+    var minY = Math.min(p1.y, currentP2.y);
+    var maxY = Math.max(p1.y, currentP2.y);
+    var minZ = Math.min(p1.z, currentP2.z);
+    var maxZ = Math.max(p1.z, currentP2.z);
 
-    // 3. Y Eksen Vektörü (P1 -> P4) XZ Düzlemine 90 Derece Dikleştirme (Cross Product)
-    var vY = new THREE.Vector3().crossVectors(vZ, vX).normalize();
-    var vY_raw = new THREE.Vector3().subVectors(p4, p1);
-    var sizeY = Math.abs(vY_raw.dot(vY));
-    if (sizeY < 0.01) sizeY = 0.01;
+    var sizeX = Math.max(0.01, maxX - minX);
+    var sizeY = Math.max(0.01, maxY - minY);
+    var sizeZ = Math.max(0.01, maxZ - minZ);
+
+    previewBoxMesh.scale.set(sizeX, sizeY, sizeZ);
+    previewBoxMesh.position.set(
+      minX + sizeX / 2,
+      minY + sizeY / 2,
+      minZ + sizeZ / 2
+    );
+    previewBoxMesh.visible = true;
+  }
+
+  function finalizeHitboxFromPreview() {
+    if (!previewBoxMesh || !previewBoxMesh.visible) return;
+
+    var sizeX = previewBoxMesh.scale.x;
+    var sizeY = previewBoxMesh.scale.y;
+    var sizeZ = previewBoxMesh.scale.z;
 
     var boxGeo = new THREE.BoxGeometry(sizeX, sizeY, sizeZ);
     var hexCol = rainbowPalette[0].hex;
-    
+
     var boxMat = new THREE.MeshStandardMaterial({
       color: hexCol,
       emissive: hexCol,
@@ -521,21 +551,8 @@
     });
 
     var boxMesh = new THREE.Mesh(boxGeo, boxMat);
+    boxMesh.position.copy(previewBoxMesh.position);
 
-    // Dönüş Matrisi Oluşturma (Local Ortogonal Eksenler)
-    var rotMatrix = new THREE.Matrix4();
-    rotMatrix.makeBasis(vX, vY, vZ);
-    boxMesh.quaternion.setFromRotationMatrix(rotMatrix);
-
-    // Kutu Merkez Pozisyonu
-    var centerOffset = new THREE.Vector3(
-      sizeX / 2,
-      (vY_raw.dot(vY) >= 0 ? sizeY : -sizeY) / 2,
-      sizeZ / 2
-    );
-    centerOffset.applyQuaternion(boxMesh.quaternion);
-    boxMesh.position.copy(p1).add(centerOffset);
-    
     var edges = new THREE.EdgesGeometry(boxGeo);
     var line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: hexCol }));
     boxMesh.add(line);
@@ -545,13 +562,13 @@
 
     customHitboxes.push({
       mesh: boxMesh,
-      rotX: THREE.MathUtils.radToDeg(boxMesh.rotation.x),
-      rotY: THREE.MathUtils.radToDeg(boxMesh.rotation.y),
-      rotZ: THREE.MathUtils.radToDeg(boxMesh.rotation.z)
+      rotX: 0,
+      rotY: 0,
+      rotZ: 0
     });
 
-    // Markerları Gizle
-    for (var k = 0; k < 4; k++) pointMarkers[k].visible = false;
+    previewBoxMesh.visible = false;
+    for (var k = 0; k < pointMarkers.length; k++) pointMarkers[k].visible = false;
   }
 
   function removeHitbox(index) {
@@ -696,18 +713,9 @@
 
           var aBtnPressed = (btns[4] && btns[4].pressed);
           if (aBtnPressed && !aButtonPressedLastFrame) {
-            if (activeMode === "HITBOX_P1" && point1) {
-              activeMode = "HITBOX_P2";
-              updateMenuTexture();
-            } else if (activeMode === "HITBOX_P2" && point2) {
-              activeMode = "HITBOX_P3";
-              updateMenuTexture();
-            } else if (activeMode === "HITBOX_P3" && point3) {
-              activeMode = "HITBOX_P4";
-              updateMenuTexture();
-            } else if (activeMode === "HITBOX_P4" && point4) {
-              create4PointHitbox(point1, point2, point3, point4);
-              point1 = point2 = point3 = point4 = null;
+            if (activeMode === "HITBOX_BUILD" && point1) {
+              finalizeHitboxFromPreview();
+              point1 = null;
               activeMode = "NONE";
               updateMenuTexture();
             } else if (activeMode === "HITBOX_LIST" && customHitboxes.length > 0) {
@@ -744,44 +752,23 @@
           }
           bButtonPressedLastFrame = bBtnPressed;
 
-          // 4 NOKTA YERLEŞTİRME TETİKLEYİCİSİ
+          // 2 NOKTA CANLI PREVIEW TETİKLEYİCİ
           if (rightTriggerPressed && !rightTriggerPressedLastFrame && rightController) {
-            var rightPos = new THREE.Vector3();
-            rightController.getWorldPosition(rightPos);
-
-            if (activeMode === "HITBOX_P1") {
-              point1 = rightPos.clone();
+            if (activeMode === "HITBOX_BUILD" && !point1) {
+              point1 = new THREE.Vector3();
+              rightController.getWorldPosition(point1);
               pointMarkers[0].position.copy(point1);
               pointMarkers[0].visible = true;
-            } else if (activeMode === "HITBOX_P2") {
-              point2 = rightPos.clone();
-              pointMarkers[1].position.copy(point2);
-              pointMarkers[1].visible = true;
-            } else if (activeMode === "HITBOX_P3") {
-              point3 = rightPos.clone();
-              pointMarkers[2].position.copy(point3);
-              pointMarkers[2].visible = true;
-            } else if (activeMode === "HITBOX_P4") {
-              point4 = rightPos.clone();
-              pointMarkers[3].position.copy(point4);
-              pointMarkers[3].visible = true;
+              updateMenuTexture();
             }
           }
           rightTriggerPressedLastFrame = rightTriggerPressed;
 
-          if ((activeMode.startsWith("HITBOX_P")) && axes && axes.length > 0) {
-            var rAxisY = axes.length >= 4 ? axes[3] : axes[1];
-            var curPoint = null;
-            var curIdx = 0;
-            if (activeMode === "HITBOX_P1") { curPoint = point1; curIdx = 0; }
-            else if (activeMode === "HITBOX_P2") { curPoint = point2; curIdx = 1; }
-            else if (activeMode === "HITBOX_P3") { curPoint = point3; curIdx = 2; }
-            else if (activeMode === "HITBOX_P4") { curPoint = point4; curIdx = 3; }
-
-            if (curPoint && Math.abs(rAxisY) > 0.1) {
-              curPoint.y -= rAxisY * 0.003;
-              pointMarkers[curIdx].position.copy(curPoint);
-            }
+          // CANLI PREVIEW GÜNCELLEMESİ
+          if (activeMode === "HITBOX_BUILD" && point1 && rightController) {
+            var currentRightPos = new THREE.Vector3();
+            rightController.getWorldPosition(currentRightPos);
+            updatePreviewBox(point1, currentRightPos);
           }
         }
 
@@ -792,7 +779,9 @@
             isMenuOpen = !isMenuOpen;
             if (!isMenuOpen) {
               activeMode = "NONE";
-              for (var k = 0; k < 4; k++) pointMarkers[k].visible = false;
+              point1 = null;
+              if (previewBoxMesh) previewBoxMesh.visible = false;
+              for (var k = 0; k < pointMarkers.length; k++) pointMarkers[k].visible = false;
               restoreAllHitboxesOpacity();
             }
             squareMenuMesh.visible = isMenuOpen;
@@ -804,10 +793,13 @@
           if (xBtnPressed && !xButtonPressedLastFrame && isMenuOpen) {
             if (activeMode === "NONE") {
               if (selectedMenuIndex === 0) activeMode = "LEVELING";
-              else if (selectedMenuIndex === 1) activeMode = "HITBOX_P1";
+              else if (selectedMenuIndex === 1) { activeMode = "HITBOX_BUILD"; point1 = null; }
               else if (selectedMenuIndex === 2) activeMode = "HITBOX_LIST";
-            } else if (activeMode === "LEVELING" || activeMode === "HITBOX_LIST") {
+            } else if (activeMode === "LEVELING" || activeMode === "HITBOX_LIST" || activeMode === "HITBOX_BUILD") {
               activeMode = "NONE";
+              point1 = null;
+              if (previewBoxMesh) previewBoxMesh.visible = false;
+              for (var k = 0; k < pointMarkers.length; k++) pointMarkers[k].visible = false;
               restoreAllHitboxesOpacity();
             } else if (activeMode === "HITBOX_COLOR_EDIT") {
               updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
@@ -823,46 +815,54 @@
             var axisY = axes.length >= 4 ? axes[3] : axes[1];
 
             if (isMenuOpen && activeMode === "NONE") {
-              if (Math.abs(axisY) > 0.5 && !stickNavCooldown) {
-                if (axisY > 0.5) selectedMenuIndex = (selectedMenuIndex + 1) % 3;
-                if (axisY < -0.5) selectedMenuIndex = (selectedMenuIndex - 1 + 3) % 3;
-                stickNavCooldown = true;
+              checkAutoRepeat('menu_nav_up', axisY < -0.5, 300, 150, function() {
+                selectedMenuIndex = (selectedMenuIndex - 1 + 3) % 3;
                 updateMenuTexture();
-              } else if (Math.abs(axisY) < 0.2) {
-                stickNavCooldown = false;
-              }
+              });
+              checkAutoRepeat('menu_nav_down', axisY > 0.5, 300, 150, function() {
+                selectedMenuIndex = (selectedMenuIndex + 1) % 3;
+                updateMenuTexture();
+              });
             } 
             else if (isMenuOpen && activeMode === "HITBOX_LIST") {
-              if (Math.abs(axisY) > 0.5 && !stickNavCooldown && customHitboxes.length > 0) {
-                if (axisY > 0.5) selectedHitboxIndex = (selectedHitboxIndex + 1) % customHitboxes.length;
-                if (axisY < -0.5) selectedHitboxIndex = (selectedHitboxIndex - 1 + customHitboxes.length) % customHitboxes.length;
-                stickNavCooldown = true;
-                updateMenuTexture();
-              } else if (Math.abs(axisY) < 0.2) {
-                stickNavCooldown = false;
+              if (customHitboxes.length > 0) {
+                checkAutoRepeat('list_nav_up', axisY < -0.5, 300, 150, function() {
+                  selectedHitboxIndex = (selectedHitboxIndex - 1 + customHitboxes.length) % customHitboxes.length;
+                  updateMenuTexture();
+                });
+                checkAutoRepeat('list_nav_down', axisY > 0.5, 300, 150, function() {
+                  selectedHitboxIndex = (selectedHitboxIndex + 1) % customHitboxes.length;
+                  updateMenuTexture();
+                });
               }
             }
             else if (isMenuOpen && activeMode === "HITBOX_COLOR_EDIT") {
               if (!isEditingValue) {
-                if (Math.abs(axisY) > 0.6 && !stickNavCooldown) {
-                  if (axisY > 0.6) activeSubSelection = Math.min(5, activeSubSelection + 1);
-                  if (axisY < -0.6) activeSubSelection = Math.max(0, activeSubSelection - 1);
-                  stickNavCooldown = true;
+                checkAutoRepeat('sub_nav_up', axisY < -0.6, 300, 150, function() {
+                  activeSubSelection = Math.max(0, activeSubSelection - 1);
                   updateMenuTexture();
-                } else if (Math.abs(axisY) < 0.2 && Math.abs(axisX) < 0.2) {
-                  stickNavCooldown = false;
-                }
+                });
+                checkAutoRepeat('sub_nav_down', axisY > 0.6, 300, 150, function() {
+                  activeSubSelection = Math.min(5, activeSubSelection + 1);
+                  updateMenuTexture();
+                });
               } else {
-                if (activeSubSelection === 0 && Math.abs(axisX) > 0.5 && !stickNavCooldown) {
-                  if (axisX > 0.5) selectedColorIndex = (selectedColorIndex + 1) % 9;
-                  if (axisX < -0.5) selectedColorIndex = (selectedColorIndex - 1 + 9) % 9;
-                  stickNavCooldown = true;
-                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
-                  updateMenuTexture();
+                // BASILI TUTMA (AUTO-REPEAT) SİSTEMİ - DÜZENLEME MODU
+                if (activeSubSelection === 0) {
+                  checkAutoRepeat('color_left', axisX < -0.5, 300, 120, function() {
+                    selectedColorIndex = (selectedColorIndex - 1 + 9) % 9;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
+                    updateMenuTexture();
+                  });
+                  checkAutoRepeat('color_right', axisX > 0.5, 300, 120, function() {
+                    selectedColorIndex = (selectedColorIndex + 1) % 9;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
+                    updateMenuTexture();
+                  });
                 }
 
                 if (activeSubSelection === 1 && Math.abs(axisX) > 0.1) {
-                  currentOpacity += axisX * 0.01;
+                  currentOpacity += axisX * 0.015;
                   if (currentOpacity < 0.1) currentOpacity = 0.1;
                   if (currentOpacity > 1.0) currentOpacity = 1.0;
                   updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
@@ -870,61 +870,55 @@
                 }
 
                 if (activeSubSelection === 2 && Math.abs(axisX) > 0.1) {
-                  currentBrightness += axisX * 0.01;
+                  currentBrightness += axisX * 0.015;
                   if (currentBrightness < 0.0) currentBrightness = 0.0;
                   if (currentBrightness > 1.0) currentBrightness = 1.0;
                   updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
                   updateMenuTexture();
                 }
 
-                if (activeSubSelection === 3 && Math.abs(axisX) > 0.3 && !stickNavCooldown) {
-                  rotX += axisX > 0 ? 1 : -1;
-                  if (rotX < -180) rotX += 360;
-                  if (rotX > 180) rotX -= 360;
-                  stickNavCooldown = true;
-                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
-                  updateMenuTexture();
+                if (activeSubSelection === 3) {
+                  checkAutoRepeat('rotX_left', axisX < -0.3, 250, 40, function() {
+                    rotX -= 1; if (rotX < -180) rotX += 360;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                    updateMenuTexture();
+                  });
+                  checkAutoRepeat('rotX_right', axisX > 0.3, 250, 40, function() {
+                    rotX += 1; if (rotX > 180) rotX -= 360;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                    updateMenuTexture();
+                  });
                 }
 
-                if (activeSubSelection === 4 && Math.abs(axisX) > 0.3 && !stickNavCooldown) {
-                  rotY += axisX > 0 ? 1 : -1;
-                  if (rotY < -180) rotY += 360;
-                  if (rotY > 180) rotY -= 360;
-                  stickNavCooldown = true;
-                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
-                  updateMenuTexture();
+                if (activeSubSelection === 4) {
+                  checkAutoRepeat('rotY_left', axisX < -0.3, 250, 40, function() {
+                    rotY -= 1; if (rotY < -180) rotY += 360;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                    updateMenuTexture();
+                  });
+                  checkAutoRepeat('rotY_right', axisX > 0.3, 250, 40, function() {
+                    rotY += 1; if (rotY > 180) rotY -= 360;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                    updateMenuTexture();
+                  });
                 }
 
-                if (activeSubSelection === 5 && Math.abs(axisX) > 0.3 && !stickNavCooldown) {
-                  rotZ += axisX > 0 ? 1 : -1;
-                  if (rotZ < -180) rotZ += 360;
-                  if (rotZ > 180) rotZ -= 360;
-                  stickNavCooldown = true;
-                  updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
-                  updateMenuTexture();
-                }
-
-                if (Math.abs(axisX) < 0.2) {
-                  stickNavCooldown = false;
+                if (activeSubSelection === 5) {
+                  checkAutoRepeat('rotZ_left', axisX < -0.3, 250, 40, function() {
+                    rotZ -= 1; if (rotZ < -180) rotZ += 360;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                    updateMenuTexture();
+                  });
+                  checkAutoRepeat('rotZ_right', axisX > 0.3, 250, 40, function() {
+                    rotZ += 1; if (rotZ > 180) rotZ -= 360;
+                    updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                    updateMenuTexture();
+                  });
                 }
               }
             }
             else if (isMenuOpen && activeMode === "LEVELING") {
               if (Math.abs(axisY) > 0.1) FLOOR_Y -= axisY * 0.002; 
-            } 
-            else if (isMenuOpen && activeMode.startsWith("HITBOX_P")) {
-              var targetPoint = null;
-              var targetIdx = 0;
-              if (activeMode === "HITBOX_P1") { targetPoint = point1; targetIdx = 0; }
-              else if (activeMode === "HITBOX_P2") { targetPoint = point2; targetIdx = 1; }
-              else if (activeMode === "HITBOX_P3") { targetPoint = point3; targetIdx = 2; }
-              else if (activeMode === "HITBOX_P4") { targetPoint = point4; targetIdx = 3; }
-
-              if (targetPoint) {
-                if (Math.abs(axisX) > 0.1) targetPoint.x += axisX * 0.003;
-                if (Math.abs(axisY) > 0.1) targetPoint.z += axisY * 0.003; 
-                pointMarkers[targetIdx].position.copy(targetPoint);
-              }
             } 
             else if (!isMenuOpen) {
               if (Math.abs(axisX) > 0.05) {
@@ -1020,9 +1014,9 @@
 
       var effectiveFloorY = FLOOR_Y;
 
-      // --- GELİŞMİŞ HITBOX ÇARPIŞMA / SÜRDÜRÜLEBİLİR RAMPA FİZİĞİ ---
+      // --- DUVALARDA DONMAYI ENGELLEYEN VE YÜZEYDE SÜRMEYİ SAĞLAYAN GÜVENLİ ÇARPIŞMA FİZİĞİ ---
       if (hitboxVisuals.length > 0) {
-        // 1. ZEMİN VE EĞİMLİ YÜZEY TESPİTİ (Aşağı Doğru Raycast)
+        // 1. ZEMİN TESPİTİ (Aşağı Raycast)
         var rayOrigin = carMesh.position.clone();
         rayOrigin.y += 0.08; 
         downRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
@@ -1035,28 +1029,35 @@
           }
         }
 
-        // 2. DUVA/KUTU İÇİNDEN GEÇMEYİ ENGELLEYEN 4-YÖNLÜ YATAY ÇARPIŞMA TESPİTİ
-        var directions = [
-          new THREE.Vector3(1, 0, 0).applyQuaternion(carMesh.quaternion),
-          new THREE.Vector3(-1, 0, 0).applyQuaternion(carMesh.quaternion),
-          new THREE.Vector3(0, 0, 1).applyQuaternion(carMesh.quaternion),
-          new THREE.Vector3(0, 0, -1).applyQuaternion(carMesh.quaternion)
-        ];
+        // 2. STABİL YAN ÇARPIŞMA TESPİTİ (Gelişmiş Bounding Box Çakışması)
+        var carBox = new THREE.Box3().setFromObject(carMesh);
+        
+        for (var h = 0; h < hitboxVisuals.length; h++) {
+          var hbMesh = hitboxVisuals[h];
+          var hbBox = new THREE.Box3().setFromObject(hbMesh);
 
-        for (var d = 0; d < 4; d++) {
-          sideRaycasters[d].set(carMesh.position, directions[d]);
-          var sideHits = sideRaycasters[d].intersectObjects(hitboxVisuals, false);
-          if (sideHits.length > 0 && sideHits[0].distance < 0.035) {
-            var pushNormal = sideHits[0].normal.clone().transformDirection(sideHits[0].object.matrixWorld);
-            pushNormal.y = 0;
-            pushNormal.normalize();
+          // Eğer araba hitbox'ın içindeyse ve tavanın altında ise (yan taraftan girdiyse)
+          if (carBox.intersectsBox(hbBox)) {
+            var overlapY = Math.min(carBox.max.y, hbBox.max.y) - Math.max(carBox.min.y, hbBox.min.y);
+            var hbTopHeight = hbBox.max.y;
 
-            // Arabayı engelin dışına it ve hızı sıfırla
-            carMesh.position.add(pushNormal.multiplyScalar(0.035 - sideHits[0].distance));
-            velocity.x = 0;
-            velocity.z = 0;
-            currentSpeed = 0;
-            break;
+            // Arabanın tabanı kutunun üst seviyesinin altındaysa bu bir yan çarpmadır
+            if (carMesh.position.y < hbTopHeight - 0.005) {
+              // Merkezler arası itme yönünü bul
+              var pushDir = new THREE.Vector3().subVectors(carMesh.position, hbMesh.position);
+              pushDir.y = 0; // Sadece yatay düzlemde it
+              
+              if (pushDir.lengthSq() > 0.00001) {
+                pushDir.normalize();
+                carMesh.position.add(pushDir.multiplyScalar(0.008)); // Güvenli şekilde dışarı it
+              }
+
+              // Hızları güvenle sıfırla (Donma / kilitlenme oluşmaz)
+              velocity.x = 0;
+              velocity.z = 0;
+              currentSpeed = 0;
+              break;
+            }
           }
         }
       }
