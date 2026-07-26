@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb</title>
+  <title>Hot Wheels MR - World Builder & Hitboxes</title>
   <style>
     body {
       margin: 0;
@@ -91,15 +91,26 @@
   var rightController = null;
   var isSpawnedAtUser = false;
 
-  // Menü & Leveling
+  // Menü & Mod Değişkenleri
   var isMenuOpen = false;
-  var isLevelingMode = false;
+  var selectedMenuIndex = 0; // 0: LEVELING, 1: ADD HITBOX
+  var activeMode = "NONE";   // "NONE", "LEVELING", "HITBOX_P1", "HITBOX_P2"
+  
   var menuButtonPressedLastFrame = false;
   var xButtonPressedLastFrame = false;
   var aButtonPressedLastFrame = false;
+  var rightTriggerPressedLastFrame = false;
+  var stickNavCooldown = false;
 
   var squareMenuMesh;
   var canvasMenu, ctxMenu, textureMenu;
+
+  // HITBOX OLUŞTURMA DEĞİŞKENLERİ
+  var customHitboxes = []; // Oluşturulan fizik kutuları listesi (Box3)
+  var hitboxVisuals = [];  // Görsel Mesh'ler
+  var point1 = null;
+  var point2 = null;
+  var tempPointMarker = null; // Havada görünen seçici nokta
 
   var startBtn = document.getElementById('start-btn');
   var loadingText = document.getElementById('loading-text');
@@ -171,46 +182,77 @@
     ctxMenu.fillStyle = 'rgba(15, 15, 20, 0.95)';
     ctxMenu.fillRect(0, 0, 512, 512);
 
-    if (!isLevelingMode) {
-      ctxMenu.strokeStyle = '#00ffcc';
-      ctxMenu.lineWidth = 12;
-      ctxMenu.strokeRect(6, 6, 500, 500);
+    ctxMenu.strokeStyle = '#00ffcc';
+    ctxMenu.lineWidth = 12;
+    ctxMenu.strokeRect(6, 6, 500, 500);
 
-      ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 44px sans-serif';
-      ctxMenu.textAlign = 'center';
-      ctxMenu.fillText('MENÜ', 256, 100);
+    ctxMenu.fillStyle = '#00ffcc';
+    ctxMenu.font = 'bold 38px sans-serif';
+    ctxMenu.textAlign = 'center';
+    ctxMenu.fillText('AYARLAR MENÜSÜ', 256, 70);
 
-      ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = 'bold 30px sans-serif';
-      ctxMenu.fillText('LEVELING (YÜKSEKLİK) İÇİN', 256, 220);
+    if (activeMode === "NONE") {
+      // Sola Seçenek Listesi
+      ctxMenu.font = 'bold 32px sans-serif';
       
-      ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 44px sans-serif';
-      ctxMenu.fillText('[ X ] TUŞUNA BAS', 256, 290);
+      // Seçenek 1: LEVELING
+      if (selectedMenuIndex === 0) {
+        ctxMenu.fillStyle = '#00ffcc';
+        ctxMenu.fillRect(30, 120, 452, 80);
+        ctxMenu.fillStyle = '#000000';
+        ctxMenu.fillText('> 1. ZEMİN YÜKSEKLİĞİ <', 256, 172);
+      } else {
+        ctxMenu.fillStyle = '#ffffff';
+        ctxMenu.fillText('1. Zemin Yüksekliği', 256, 172);
+      }
+
+      // Seçenek 2: ADD HITBOX
+      if (selectedMenuIndex === 1) {
+        ctxMenu.fillStyle = '#00ffcc';
+        ctxMenu.fillRect(30, 230, 452, 80);
+        ctxMenu.fillStyle = '#000000';
+        ctxMenu.fillText('> 2. KUTU (HITBOX) EKLE <', 256, 282);
+      } else {
+        ctxMenu.fillStyle = '#ffffff';
+        ctxMenu.fillText('2. Kutu (Hitbox) Ekle', 256, 282);
+      }
 
       ctxMenu.fillStyle = '#aaaaaa';
-      ctxMenu.font = '24px sans-serif';
-      ctxMenu.fillText('Kapatmak için: [ Y ] Tuşu', 256, 420);
-    } else {
-      ctxMenu.strokeStyle = '#ffcc00';
-      ctxMenu.lineWidth = 12;
-      ctxMenu.strokeRect(6, 6, 500, 500);
+      ctxMenu.font = '22px sans-serif';
+      ctxMenu.fillText('Geçiş: Sol Stick Up/Down', 256, 380);
+      ctxMenu.fillText('Seç: [ X ]  |  Kapat: [ Y ]', 256, 420);
 
+    } else if (activeMode === "LEVELING") {
       ctxMenu.fillStyle = '#ffcc00';
-      ctxMenu.font = 'bold 40px sans-serif';
-      ctxMenu.textAlign = 'center';
-      ctxMenu.fillText('LEVELING MODU', 256, 90);
-
-      ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = '28px sans-serif';
-      ctxMenu.fillText('Sol Stick İle', 256, 180);
-      ctxMenu.fillText('Yüksekliği Ayarla', 256, 220);
-
-      ctxMenu.fillStyle = '#00ffcc';
       ctxMenu.font = 'bold 36px sans-serif';
-      ctxMenu.fillText('Kaydet ve Çık:', 256, 330);
-      ctxMenu.fillText('[ X ] TUŞUNA BAS', 256, 390);
+      ctxMenu.fillText('ZEMİN SEVİYESİ AYARI', 256, 160);
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = '26px sans-serif';
+      ctxMenu.fillText('Sol Stick İle Yüksekliği Ayarla', 256, 240);
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.fillText('Kaydet ve Çık: [ X ]', 256, 340);
+
+    } else if (activeMode === "HITBOX_P1") {
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 34px sans-serif';
+      ctxMenu.fillText('HITBOX: 1. NOKTA', 256, 140);
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = '24px sans-serif';
+      ctxMenu.fillText('1. Sağ Trigger ile Nokta Koy', 256, 210);
+      ctxMenu.fillText('2. Sol Stick ile Konum Kaydır', 256, 260);
+      ctxMenu.fillStyle = '#ffcc00';
+      ctxMenu.fillText('Onayla ve Kaydet: [ A ]', 256, 340);
+
+    } else if (activeMode === "HITBOX_P2") {
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.font = 'bold 34px sans-serif';
+      ctxMenu.fillText('HITBOX: 2. NOKTA', 256, 140);
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = '24px sans-serif';
+      ctxMenu.fillText('1. Çapraz İkinci Noktayı Koy', 256, 210);
+      ctxMenu.fillText('2. Sol Stick ile Boyutu Ayarla', 256, 260);
+      ctxMenu.fillStyle = '#00ffcc';
+      ctxMenu.fillText('Kutuyu Oluştur: [ A ]', 256, 340);
     }
 
     textureMenu.needsUpdate = true;
@@ -249,6 +291,13 @@
       carMesh.add(loadedReverbModel);
     }
 
+    // Seçici Nokta İşaretçisi (Şeffaf Küre)
+    var pointGeo = new THREE.SphereGeometry(0.015, 16, 16);
+    var pointMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, wireframe: true });
+    tempPointMarker = new THREE.Mesh(pointGeo, pointMat);
+    tempPointMarker.visible = false;
+    scene.add(tempPointMarker);
+
     controller0 = renderer.xr.getController(0);
     scene.add(controller0);
 
@@ -263,7 +312,7 @@
 
     updateMenuTexture();
 
-    var planeGeo = new THREE.PlaneGeometry(0.15, 0.15); 
+    var planeGeo = new THREE.PlaneGeometry(0.16, 0.16); 
     var planeMat = new THREE.MeshBasicMaterial({ map: textureMenu, side: THREE.DoubleSide, transparent: true });
     squareMenuMesh = new THREE.Mesh(planeGeo, planeMat);
 
@@ -272,6 +321,48 @@
     squareMenuMesh.visible = false;
 
     renderer.setAnimationLoop(render);
+  }
+
+  function createHitboxBox(p1, p2) {
+    var minX = Math.min(p1.x, p2.x);
+    var maxX = Math.max(p1.x, p2.x);
+    var minY = Math.min(p1.y, p2.y);
+    var maxY = Math.max(p1.y, p2.y);
+    var minZ = Math.min(p1.z, p2.z);
+    var maxZ = Math.max(p1.z, p2.z);
+
+    // Çok küçük boyutları engelle
+    if (maxX - minX < 0.02) maxX = minX + 0.02;
+    if (maxY - minY < 0.02) maxY = minY + 0.02;
+    if (maxZ - minZ < 0.02) maxZ = minZ + 0.02;
+
+    var width = maxX - minX;
+    var height = maxY - minY;
+    var depth = maxZ - minZ;
+
+    // Görsel Şeffaf Gri Kutu Mesh
+    var boxGeo = new THREE.BoxGeometry(width, height, depth);
+    var boxMat = new THREE.MeshStandardMaterial({
+      color: 0x888888,
+      transparent: true,
+      opacity: 0.45,
+      roughness: 0.2
+    });
+
+    var boxMesh = new THREE.Mesh(boxGeo, boxMat);
+    boxMesh.position.set(minX + width/2, minY + height/2, minZ + depth/2);
+    
+    // Kenar çizgileri (Wireframe Outlines)
+    var edges = new THREE.EdgesGeometry(boxGeo);
+    var line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x00ffcc }));
+    boxMesh.add(line);
+
+    scene.add(boxMesh);
+    hitboxVisuals.push(boxMesh);
+
+    // Fizik Çarpışma Kutusu (Box3)
+    var box3 = new THREE.Box3(new THREE.Vector3(minX, minY, minZ), new THREE.Vector3(maxX, maxY, maxZ));
+    customHitboxes.push(box3);
   }
 
   function teleportCarToUser() {
@@ -346,54 +437,116 @@
         }
 
         var btns = source.gamepad.buttons;
+        var axes = source.gamepad.axes;
 
+        // --- SAĞ KUMANDA ---
         if (source.handedness === 'right') {
-          if (btns[0] && btns[0].value > 0.1) {
+          var rTriggerValue = btns[0] ? btns[0].value : 0;
+          if (rTriggerValue > 0.1) {
             rightTriggerPressed = true;
-            if (!activeGrabber && !isMenuOpen && !isLevelingMode) isThrottlePressed = true;
+            if (!activeGrabber && isMenuOpen && activeMode === "NONE") isThrottlePressed = true;
           }
           if (btns[1] && btns[1].value > 0.1) {
-            if (!activeGrabber && !isMenuOpen && !isLevelingMode) isBrakePressed = true;
+            if (!activeGrabber && !isMenuOpen) isBrakePressed = true;
           }
 
+          // A Tuşu Mantığı
           var aBtnPressed = (btns[4] && btns[4].pressed);
           if (aBtnPressed && !aButtonPressedLastFrame) {
-            teleportCarToUser(); 
+            if (activeMode === "HITBOX_P1" && point1) {
+              activeMode = "HITBOX_P2";
+              updateMenuTexture();
+            } else if (activeMode === "HITBOX_P2" && point2) {
+              createHitboxBox(point1, point2);
+              point1 = null;
+              point2 = null;
+              tempPointMarker.visible = false;
+              activeMode = "NONE";
+              updateMenuTexture();
+            } else if (activeMode === "NONE" && !isMenuOpen) {
+              teleportCarToUser(); 
+            }
           }
           aButtonPressedLastFrame = aBtnPressed;
+
+          // Hitbox Koyma için Sağ Trigger
+          if (rightTriggerPressed && !rightTriggerPressedLastFrame && rightController) {
+            var rightPos = new THREE.Vector3();
+            rightController.getWorldPosition(rightPos);
+
+            if (activeMode === "HITBOX_P1") {
+              point1 = rightPos.clone();
+              tempPointMarker.position.copy(point1);
+              tempPointMarker.visible = true;
+            } else if (activeMode === "HITBOX_P2") {
+              point2 = rightPos.clone();
+              tempPointMarker.position.copy(point2);
+              tempPointMarker.visible = true;
+            }
+          }
+          rightTriggerPressedLastFrame = rightTriggerPressed;
         }
 
+        // --- SOL KUMANDA ---
         if (source.handedness === 'left') {
-          var axes = source.gamepad.axes;
 
+          // Y Tuşu (Menü Aç/Kapa)
           var yBtnPressed = (btns[5] && btns[5].pressed);
           if (yBtnPressed && !menuButtonPressedLastFrame) {
             isMenuOpen = !isMenuOpen;
             if (!isMenuOpen) {
-              isLevelingMode = false;
+              activeMode = "NONE";
+              tempPointMarker.visible = false;
             }
             squareMenuMesh.visible = isMenuOpen;
             updateMenuTexture();
           }
           menuButtonPressedLastFrame = yBtnPressed;
 
+          // X Tuşu (Seçimi Onayla)
           var xBtnPressed = (btns[4] && btns[4].pressed);
           if (xBtnPressed && !xButtonPressedLastFrame && isMenuOpen) {
-            isLevelingMode = !isLevelingMode; 
+            if (activeMode === "NONE") {
+              if (selectedMenuIndex === 0) activeMode = "LEVELING";
+              else if (selectedMenuIndex === 1) activeMode = "HITBOX_P1";
+            } else if (activeMode === "LEVELING") {
+              activeMode = "NONE";
+            }
             updateMenuTexture();
           }
           xButtonPressedLastFrame = xBtnPressed;
 
-          if (isLevelingMode && axes && axes.length > 1) {
+          // Sol Stick Gezinme ve İnce Ayar
+          if (axes && axes.length > 0) {
+            var axisX = axes[0];
             var axisY = axes.length >= 4 ? axes[3] : axes[1];
-            if (Math.abs(axisY) > 0.1) {
-              FLOOR_Y -= axisY * 0.002; 
-            }
-          } 
-          else if (!isMenuOpen && axes && axes.length > 0) {
-            var axisX = axes.length >= 4 ? axes[2] : axes[0];
-            if (Math.abs(axisX) > 0.05) {
-              turnValue = axisX;
+
+            if (isMenuOpen && activeMode === "NONE") {
+              // Menü İçi Yukarı/Aşağı Gezinme
+              if (Math.abs(axisY) > 0.6 && !stickNavCooldown) {
+                if (axisY < -0.6) selectedMenuIndex = 0; // Yukarı
+                if (axisY > 0.6) selectedMenuIndex = 1;  // Aşağı
+                stickNavCooldown = true;
+                updateMenuTexture();
+              } else if (Math.abs(axisY) < 0.2) {
+                stickNavCooldown = false;
+              }
+            } 
+            else if (activeMode === "LEVELING") {
+              if (Math.abs(axisY) > 0.1) FLOOR_Y -= axisY * 0.002; 
+            } 
+            else if (activeMode === "HITBOX_P1" && point1) {
+              point1.x += axisX * 0.005;
+              point1.y -= axisY * 0.005;
+              tempPointMarker.position.copy(point1);
+            } 
+            else if (activeMode === "HITBOX_P2" && point2) {
+              point2.x += axisX * 0.005;
+              point2.y -= axisY * 0.005;
+              tempPointMarker.position.copy(point2);
+            } 
+            else if (!isMenuOpen) {
+              if (Math.abs(axisX) > 0.05) turnValue = axisX;
             }
           }
 
@@ -404,6 +557,7 @@
       }
     }
 
+    // --- GRAB / ELLE TUTMA DONGUSU ---
     var leftPos = new THREE.Vector3();
     var rightPos = new THREE.Vector3();
 
@@ -473,13 +627,32 @@
     else {
       var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
       var isUpright = upVector.y > 0;
-      var currentMinY = isUpright ? (FLOOR_Y + CAR_HEIGHT_UPRIGHT) : (FLOOR_Y + CAR_HEIGHT_UPSIDEDOWN);
+      var carHeightOffset = isUpright ? CAR_HEIGHT_UPRIGHT : CAR_HEIGHT_UPSIDEDOWN;
+
+      // --- DİNAMİK YÜKSEKLİK VE HITBOX KONTROLÜ ---
+      var effectiveFloorY = FLOOR_Y; // Varsayılan yer seviyesi
+
+      // Eklenen tüm kutular arasında arabanın altında kalan var mı kontrol et
+      for (var h = 0; h < customHitboxes.length; h++) {
+        var box = customHitboxes[h];
+        
+        // Arabanın X ve Z koordinatları kutunun sınırları içerisinde mi?
+        if (carMesh.position.x >= box.min.x && carMesh.position.x <= box.max.x &&
+            carMesh.position.z >= box.min.z && carMesh.position.z <= box.max.z) {
+          
+          // Arabanın altındaki en yüksek kutu yüzeyini zemin kabul et
+          if (box.max.y > effectiveFloorY && carMesh.position.y >= box.max.y - 0.02) {
+            effectiveFloorY = box.max.y;
+          }
+        }
+      }
+
+      var currentMinY = effectiveFloorY + carHeightOffset;
 
       // HAVADAKİ FİZİK
       if (carMesh.position.y > currentMinY || velocity.y > 0) {
         velocity.y += GRAVITY * delta;
 
-        // Hava içinde açısal takla dönüşü
         carMesh.rotateX(angularVelocity.x * delta);
         carMesh.rotateY(angularVelocity.y * delta);
         carMesh.rotateZ(angularVelocity.z * delta);
@@ -489,28 +662,22 @@
         carMesh.position.z += velocity.z * delta;
       }
 
-      // ZEMİN KONTROLÜ VE TAKLA (PITCH / FLIP) FİZİĞİ
+      // ZEMİN VE HITBOX ÇARPIŞMASI
       if (carMesh.position.y <= currentMinY) {
         carMesh.position.y = currentMinY;
 
-        // Arabanın yere olan eğim açısını bul
         var carEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
 
         if (Math.abs(velocity.y) > BOUNCE_THRESHOLD) {
-          
-          // EĞİMLİ / BURUN AŞAĞI VURMA KONTROLÜ
           if (Math.abs(carEuler.x) > 0.2) {
-            // Yere eğimli vurursa sekip ön/arka ekseninde takla atsın (Takla ivmesi)
             var flipForce = (carEuler.x > 0 ? 1 : -1) * (Math.abs(velocity.y) * 15.0);
             angularVelocity.x = flipForce;
             
-            // Çarptıktan sonra havaya sıçrama
             velocity.y = -velocity.y * BOUNCE_FACTOR;
             velocity.x *= 0.7;
             velocity.z *= 0.7;
           } 
           else {
-            // Normal düz sekme
             velocity.y = -velocity.y * BOUNCE_FACTOR;
             angularVelocity.x = (Math.random() - 0.5) * 3.0;
             angularVelocity.z = (Math.random() - 0.5) * 3.0;
@@ -519,21 +686,16 @@
           }
 
           smoothAlignToFloor(!isUpright, 0.2);
-
         } 
-        // Yere oturduğunda (Sönümlenme)
         else {
           velocity.y = 0;
-          
-          // Dönme hızlarını hızla sönümle (Yere yapışsın)
           angularVelocity.multiplyScalar(0.2);
           velocity.x *= 0.75;
           velocity.z *= 0.75;
 
-          // Yumuşakça zemine oturt
           smoothAlignToFloor(!isUpright, 0.25);
 
-          if (isUpright && !isMenuOpen && !isLevelingMode) {
+          if (isUpright && !isMenuOpen) {
             if (isThrottlePressed) {
               if (currentSpeed > MAX_SPEED_FORWARD) {
                 currentSpeed -= ACCEL;
