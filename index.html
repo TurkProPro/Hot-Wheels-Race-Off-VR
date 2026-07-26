@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb (Button Fix)</title>
+  <title>Hot Wheels MR - Acceleracers Reverb (Exact Button Mapping)</title>
   <style>
     body {
       margin: 0;
@@ -316,12 +316,12 @@
           }
         }
 
-        // SOL KUMANDA 
+        // SOL KUMANDA
         if (source.handedness === 'left') {
           var axes = source.gamepad.axes;
 
-          // 1. Sol Kumanda Menü Tuşu (Düzeltildi: Grip button[1] es geçildi, 5. veya 3. tuş kontrol ediliyor)
-          var menuBtnPressed = (btns[5] && btns[5].pressed) || (btns[3] && btns[3].pressed);
+          // 1. Menü Tuşu (Düzeltildi: Sadece buttons[5] yani Sol Kumandadaki 3 Çizgi / Sistem Menü Tuşu)
+          var menuBtnPressed = (btns[5] && btns[5].pressed);
           if (menuBtnPressed && !menuButtonPressedLastFrame) {
             isMenuOpen = !isMenuOpen;
             if (!isMenuOpen) {
@@ -332,7 +332,7 @@
           }
           menuButtonPressedLastFrame = menuBtnPressed;
 
-          // 2. Sol Kumanda X Tuşu (WebXR Standardında X tuşu button 4'tür)
+          // 2. X Tuşu (Düzeltildi: buttons[4] yani Sol Kumandadaki X Tuşu)
           var xBtnPressed = (btns[4] && btns[4].pressed);
 
           if (xBtnPressed && !xButtonPressedLastFrame && isMenuOpen) {
