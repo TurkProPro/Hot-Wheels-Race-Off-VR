@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb</title>
+  <title>Hot Wheels MR - Acceleracers Reverb (Manual Leveling)</title>
   <style>
     body {
       margin: 0;
@@ -38,6 +38,65 @@
       color: #00ffcc;
       z-index: 9999;
     }
+    /* MR İÇİ ARAYÜZ (DOM OVERLAY) */
+    #mr-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      display: none;
+      pointer-events: none;
+      z-index: 10000;
+    }
+    #menu-panel {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0, 0, 0, 0.85);
+      border: 2px solid #00ffcc;
+      border-radius: 16px;
+      padding: 25px;
+      text-align: center;
+      display: none;
+      pointer-events: auto;
+      box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
+    }
+    #menu-panel h2 {
+      margin-top: 0;
+      color: #00ffcc;
+    }
+    .mr-btn {
+      padding: 12px 24px;
+      font-size: 18px;
+      font-weight: bold;
+      background-color: #00ffcc;
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      margin: 10px;
+    }
+    #leveling-indicator {
+      position: absolute;
+      top: 15%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.8);
+      border: 2px solid #ffcc00;
+      border-radius: 12px;
+      padding: 15px 30px;
+      text-align: center;
+      display: none;
+      pointer-events: auto;
+    }
+    #leveling-indicator p {
+      margin: 0 0 10px 0;
+      color: #ffcc00;
+      font-size: 16px;
+      font-weight: bold;
+    }
   </style>
 
   <!-- Three.js ve GLTFLoader Kütüphaneleri -->
@@ -49,10 +108,24 @@
   <button id="start-btn" style="display:none;">HOT WHEELS MR'I BAŞLAT</button>
   <div id="loading-text">Model Arka Planda Yükleniyor...</div>
 
+  <!-- MR Overlay ve Menüler -->
+  <div id="mr-overlay">
+    <div id="menu-panel">
+      <h2>AYARLAR</h2>
+      <button id="btn-start-leveling" class="mr-btn">MANUEL LEVELING</button>
+      <button id="btn-close-menu" class="mr-btn" style="background:#ff3366; color:#fff;">KAPAT</button>
+    </div>
+
+    <div id="leveling-indicator">
+      <p>Sol Thumbstick (Yukarı / Aşağı) İle Yüksekliği Ayarlayın</p>
+      <button id="btn-done-leveling" class="mr-btn" style="background:#00ffcc; color:#000;">DONE</button>
+    </div>
+  </div>
+
 <script>
   var scene, camera, renderer;
   var carMesh; 
-  var loadedReverbModel = null; // Önceden yüklenmiş model deposu
+  var loadedReverbModel = null; 
 
   // Sürüş Değişkenleri
   var currentSpeed = 0;
@@ -77,8 +150,13 @@
   var lastControllerEuler = new THREE.Euler(0, 0, 0);
   
   var GRAVITY = -9.81;
-  var FLOOR_Y = 0.008; 
+  var FLOOR_Y = 0.008; // Manuel ayarlanabilen zemin seviyesi
   var GRAB_RADIUS = 0.05; 
+
+  // Leveling & Menü Durumları
+  var isMenuOpen = false;
+  var isLevelingMode = false;
+  var menuButtonPressedLastFrame = false;
 
   var leftController = null;
   var rightController = null;
@@ -86,18 +164,21 @@
 
   var startBtn = document.getElementById('start-btn');
   var loadingText = document.getElementById('loading-text');
+  var mrOverlay = document.getElementById('mr-overlay');
+  var menuPanel = document.getElementById('menu-panel');
+  var levelingIndicator = document.getElementById('leveling-indicator');
+  var btnStartLeveling = document.getElementById('btn-start-leveling');
+  var btnCloseMenu = document.getElementById('btn-close-menu');
+  var btnDoneLeveling = document.getElementById('btn-done-leveling');
 
-  // --- 1. MODELİ SAYFA AÇILIR AÇILMAZ ÖNDEN YÜKLE ---
+  // --- MODEL ÖNCEDEN YÜKLEME ---
   var loader = new THREE.GLTFLoader();
 
-  // NOT: Lütfen sunucudaki .glb dosya adının tam olarak 'car_model.glb' olduğundan emin ol.
   loader.load('./car_model.glb', function(gltf) {
     loadedReverbModel = gltf.scene;
 
-    // Eksen Hizalama
     loadedReverbModel.rotation.y = Math.PI / 2;
 
-    // Boyutlandırma (Hot Wheels: 7cm)
     var bboxInitial = new THREE.Box3().setFromObject(loadedReverbModel);
     var currentLength = bboxInitial.max.z - bboxInitial.min.z;
     if ((bboxInitial.max.x - bboxInitial.min.x) > currentLength) {
@@ -118,7 +199,6 @@
     var bboxFinal = new THREE.Box3().setFromObject(loadedReverbModel);
     loadedReverbModel.position.y = -bboxFinal.min.y - 0.01; 
 
-    // Yükleme Tamamlandı, Butonu Göster
     loadingText.style.display = 'none';
     startBtn.style.display = 'block';
 
@@ -130,10 +210,28 @@
   }, function(error) {
     console.error('GLB Yükleme Hatası:', error);
     loadingText.style.color = '#ff3366';
-    loadingText.innerText = 'HATA: "car_model.glb" dosyası bulunamadı! Dosya adını ve yerini kontrol edin.';
+    loadingText.innerText = 'HATA: "car_model.glb" bulunamadı!';
   });
 
-  // --- 2. WEBXR OTURUMUNU BAŞLAT ---
+  // UI BUTON DİNLENİCİLERİ
+  btnStartLeveling.addEventListener('click', function() {
+    isMenuOpen = false;
+    menuPanel.style.display = 'none';
+    isLevelingMode = true;
+    levelingIndicator.style.display = 'block';
+  });
+
+  btnCloseMenu.addEventListener('click', function() {
+    isMenuOpen = false;
+    menuPanel.style.display = 'none';
+  });
+
+  btnDoneLeveling.addEventListener('click', function() {
+    isLevelingMode = false;
+    levelingIndicator.style.display = 'none';
+  });
+
+  // WEBXR OTURUMU
   startBtn.addEventListener('click', function() {
     if (!navigator.xr) {
       alert('WebXR desteklenmiyor!');
@@ -142,9 +240,10 @@
 
     navigator.xr.requestSession('immersive-ar', {
       optionalFeatures: ['hit-test', 'dom-overlay', 'local-floor', 'bounded-floor'],
-      domOverlay: { root: document.body }
+      domOverlay: { root: mrOverlay }
     }).then(function(session) {
       startBtn.style.display = 'none';
+      mrOverlay.style.display = 'block';
       initThreeJS(session);
     }).catch(function(err) {
       alert('MR Başlatılamadı: ' + err.message);
@@ -183,7 +282,6 @@
     carMesh.position.set(0, FLOOR_Y, -0.4);
     scene.add(carMesh);
 
-    // Önceden yüklenen modeli doğrudan Hitbox'a ekle
     if (loadedReverbModel) {
       carMesh.add(loadedReverbModel);
     }
@@ -233,17 +331,42 @@
         if (source.handedness === 'right') {
           if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
             rightTriggerPressed = true;
-            if (!activeGrabber) isThrottlePressed = true;
+            if (!activeGrabber && !isMenuOpen && !isLevelingMode) isThrottlePressed = true;
           }
           if (source.gamepad.buttons[1] && source.gamepad.buttons[1].value > 0.1) {
-            if (!activeGrabber) isBrakePressed = true;
+            if (!activeGrabber && !isMenuOpen && !isLevelingMode) isBrakePressed = true;
           }
         }
 
-        // Sol Kumanda (Direksiyon)
+        // Sol Kumanda (Direksiyon, Menü Tuşu & Leveling Kontrolü)
         if (source.handedness === 'left') {
           var axes = source.gamepad.axes;
-          if (axes && axes.length > 0) {
+
+          // 1. Üç Çizgi / Menü Tuşu Tespiti (Button 1 / Menu Button)
+          var menuBtnPressed = source.gamepad.buttons[1] && source.gamepad.buttons[1].pressed;
+          if (menuBtnPressed && !menuButtonPressedLastFrame) {
+            if (!isLevelingMode) {
+              isMenuOpen = !isMenuOpen;
+              menuPanel.style.display = isMenuOpen ? 'block' : 'none';
+            }
+          }
+          menuButtonPressedLastFrame = menuBtnPressed;
+
+          // 2. Manuel Leveling Modu (Y-Axis ile Yükseklik Değiştirme)
+          if (isLevelingMode && axes && axes.length > 1) {
+            var axisY = axes.length >= 4 ? axes[3] : axes[1]; // Y ekseni
+            if (Math.abs(axisY) > 0.1) {
+              // Stick'i yukarı/aşağı ittikçe FLOOR_Y hassas şekilde güncellenir
+              FLOOR_Y -= axisY * 0.003; 
+              
+              // Eğer araba zemindeyse canlı olarak yükselip alçalmasını sağla
+              if (!activeGrabber) {
+                carMesh.position.y = FLOOR_Y;
+              }
+            }
+          } 
+          // Normal Sürüş Modu (Direksiyon)
+          else if (!isMenuOpen && axes && axes.length > 0) {
             var axisX = axes.length >= 4 ? axes[2] : axes[0];
             if (Math.abs(axisX) > 0.05) {
               turnValue = axisX;
@@ -362,7 +485,8 @@
       var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
       var isUprightAndOnGround = upVector.y > 0.65;
 
-      if (carMesh.position.y <= FLOOR_Y + 0.005 && isUprightAndOnGround) {
+      // Sürüş Sadece Menü/Leveling Kapalıyken Aktif
+      if (carMesh.position.y <= FLOOR_Y + 0.005 && isUprightAndOnGround && !isMenuOpen && !isLevelingMode) {
         
         if (isThrottlePressed) {
           if (currentSpeed > MAX_SPEED_FORWARD) {
