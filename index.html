@@ -65,7 +65,7 @@
   var isBrakePressed = false;
   var turnValue = 0;
 
-  // Fizik & Sekme Değişkenleri
+  // Fizik & Sekme Değişkenleri (Gerçekçi Hiyerarşi)
   var activeGrabber = null; 
   var isJustGrabbed = false;
 
@@ -79,15 +79,20 @@
   var FLOOR_Y = 0.0; 
   var CAR_HEIGHT_UPRIGHT = 0.012; 
   var CAR_HEIGHT_UPSIDEDOWN = 0.010; 
-  var BOUNCE_FACTOR = 0.35;       
-  var BOUNCE_THRESHOLD = 0.30;    
-  var GRAB_RADIUS = 0.10; 
+  
+  // Hassas fizik ayarları
+  var BOUNCE_FACTOR = 0.40;       // Yere çarpma enerjisinin korunan miktarı
+  var BOUNCE_THRESHOLD = 0.25;    // Bu dikey hızın üstündeyse sekmeye devam eder
+  var GRAB_RADIUS = 0.12; 
 
-  // Kumandalar, Menü & Leveling
+  // Kumandalar (Dinamik)
+  var controller0 = null;
+  var controller1 = null;
   var leftController = null;
   var rightController = null;
   var isSpawnedAtUser = false;
 
+  // Menü & Leveling
   var isMenuOpen = false;
   var isLevelingMode = false;
   var menuButtonPressedLastFrame = false;
@@ -245,11 +250,11 @@
       carMesh.add(loadedReverbModel);
     }
 
-    leftController = renderer.xr.getController(0);
-    scene.add(leftController);
+    controller0 = renderer.xr.getController(0);
+    scene.add(controller0);
 
-    rightController = renderer.xr.getController(1);
-    scene.add(rightController);
+    controller1 = renderer.xr.getController(1);
+    scene.add(controller1);
 
     canvasMenu = document.createElement('canvas');
     canvasMenu.width = 512;
@@ -266,8 +271,6 @@
     squareMenuMesh.position.set(0, 0.12, -0.05);
     squareMenuMesh.rotation.x = -Math.PI / 6; 
     squareMenuMesh.visible = false;
-
-    leftController.add(squareMenuMesh);
 
     renderer.setAnimationLoop(render);
   }
@@ -296,15 +299,16 @@
     activeGrabber = null;
   }
 
-  // Arabayı zemine tam paralel oturtma fonksiyonu
-  function alignCarToFloor(isUpsideDown) {
-    var euler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
+  // Arabayı yere çakılmadan yumuşakça (Smooth) hizalayan fonksiyon
+  function smoothAlignToFloor(isUpsideDown, factor) {
+    var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
     
-    // Pitch ve Roll açılarını sıfırla (eğimi bitir), sadece Y (yaw) dönme açısını koru
-    euler.x = 0;
-    euler.z = isUpsideDown ? Math.PI : 0; // Tavan üstündeyse 180 derece ters bas
-    
-    carMesh.quaternion.setFromEuler(euler);
+    // Hedef açı: Yön (Yaw) açısını koru, Pitch ve Roll açılarını zemine düzle
+    var targetEuler = new THREE.Euler(0, currentEuler.y, isUpsideDown ? Math.PI : 0, 'YXZ');
+    var targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
+
+    // Slerp ile yumuşak geçiş sağla
+    carMesh.quaternion.slerp(targetQuat, factor);
   }
 
   var lastTime = performance.now();
@@ -335,6 +339,16 @@
       for (var i = 0; i < session.inputSources.length; i++) {
         var source = session.inputSources[i];
         if (!source.gamepad) continue;
+
+        var targetController = (i === 0) ? controller0 : controller1;
+        if (source.handedness === 'left') {
+          leftController = targetController;
+          if (squareMenuMesh.parent !== leftController) {
+            leftController.add(squareMenuMesh);
+          }
+        } else if (source.handedness === 'right') {
+          rightController = targetController;
+        }
 
         var btns = source.gamepad.buttons;
 
@@ -401,17 +415,26 @@
     if (leftController) leftController.getWorldPosition(leftPos);
     if (rightController) rightController.getWorldPosition(rightPos);
 
-    var distLeft = leftPos.distanceTo(carMesh.position);
-    var distRight = rightPos.distanceTo(carMesh.position);
+    var distLeft = leftController ? leftPos.distanceTo(carMesh.position) : 999;
+    var distRight = rightController ? rightPos.distanceTo(carMesh.position) : 999;
 
     var prevGrabber = activeGrabber;
 
-    if (leftTriggerPressed && (distLeft < GRAB_RADIUS || activeGrabber === 'left')) {
-      activeGrabber = 'left';
-    } else if (rightTriggerPressed && (distRight < GRAB_RADIUS || activeGrabber === 'right')) {
-      activeGrabber = 'right';
-    } else {
-      activeGrabber = null;
+    if (activeGrabber) {
+      if (activeGrabber === 'left' && !leftTriggerPressed) activeGrabber = null;
+      if (activeGrabber === 'right' && !rightTriggerPressed) activeGrabber = null;
+    } 
+    else {
+      var leftEligible = leftTriggerPressed && (distLeft < GRAB_RADIUS);
+      var rightEligible = rightTriggerPressed && (distRight < GRAB_RADIUS);
+
+      if (leftEligible && rightEligible) {
+        activeGrabber = (distLeft <= distRight) ? 'left' : 'right';
+      } else if (leftEligible) {
+        activeGrabber = 'left';
+      } else if (rightEligible) {
+        activeGrabber = 'right';
+      }
     }
 
     if (activeGrabber && !prevGrabber) {
@@ -454,14 +477,13 @@
     } 
     else {
       var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
-      var isUpright = upVector.y > 0; // Yukarı bakıyorsa düz kabul et, yoksa ters
+      var isUpright = upVector.y > 0;
       var currentMinY = isUpright ? (FLOOR_Y + CAR_HEIGHT_UPRIGHT) : (FLOOR_Y + CAR_HEIGHT_UPSIDEDOWN);
 
-      // SERBEST DÜŞÜŞ MANTIĞI
+      // HAVADAKİ FİZİK
       if (carMesh.position.y > currentMinY || velocity.y > 0) {
         velocity.y += GRAVITY * delta;
 
-        // Havada takla/açısal dönüş
         carMesh.rotation.x += angularVelocity.x * delta;
         carMesh.rotation.y += angularVelocity.y * delta;
         carMesh.rotation.z += angularVelocity.z * delta;
@@ -471,29 +493,32 @@
         carMesh.position.z += velocity.z * delta;
       }
 
-      // ZEMİNE ÇARPIŞMA VEYA TEMAS HİZALAMASI
+      // ZEMİN KONTROLÜ VE DİNAMİK SEKME
       if (carMesh.position.y <= currentMinY) {
         carMesh.position.y = currentMinY;
 
-        // Sekme Alanı
+        // Düşüş hızı yüksekse sekme başlat
         if (Math.abs(velocity.y) > BOUNCE_THRESHOLD) {
-          velocity.y = -velocity.y * BOUNCE_FACTOR;
-          velocity.x *= 0.6;
-          velocity.z *= 0.6;
+          velocity.y = -velocity.y * BOUNCE_FACTOR; // Hıza bağlı sekme yüksekliği
+          velocity.x *= 0.65;
+          velocity.z *= 0.65;
 
-          // Çarpışmanın yarattığı hafif yalpalama
-          angularVelocity.x = (Math.random() - 0.5) * 4.0;
-          angularVelocity.z = (Math.random() - 0.5) * 4.0;
+          // Çarpışma anında hafif rastgele yalpalama
+          angularVelocity.x = (Math.random() - 0.5) * 3.0;
+          angularVelocity.z = (Math.random() - 0.5) * 3.0;
+
+          // Sekme anında zemine doğru yumuşak açısal hizalanma
+          smoothAlignToFloor(!isUpright, 0.25);
         } 
-        // Yere tam oturma anı
+        // Sekme hızı tükendiyse zemine oturma aşaması
         else {
           velocity.y = 0;
-          angularVelocity.set(0, 0, 0); // Dönme ivmesini tamamen durdur
+          angularVelocity.multiplyScalar(0.1); // Dönüş ivmesini sönümle
           velocity.x *= 0.8;
           velocity.z *= 0.8;
 
-          // ZEMİNE PARALEL HİZALA (Tekerleklerin veya Tavanın Üstüne Tam Oturt)
-          alignCarToFloor(!isUpright);
+          // Zemine tamamen yumuşakça (Lerp/Slerp) kilitlen
+          smoothAlignToFloor(!isUpright, 0.2);
 
           if (isUpright && !isMenuOpen && !isLevelingMode) {
             if (isThrottlePressed) {
