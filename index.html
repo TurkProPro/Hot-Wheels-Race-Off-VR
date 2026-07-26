@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb (Realistic Physics)</title>
+  <title>Hot Wheels MR - Acceleracers Reverb (Advanced Physics)</title>
   <style>
     body {
       margin: 0;
@@ -54,11 +54,17 @@
   var scene, camera, renderer;
   var carMesh; 
 
-  // Kontrol Değişkenleri
-  var isMovingForward = false;
-  var isMovingBackward = false;
+  // Sürüş & İvmelenme Değişkenleri
+  var currentSpeed = 0;
+  var MAX_SPEED_FORWARD = -0.012; // Maksimum İleri Hız
+  var MAX_SPEED_BACKWARD = 0.006;  // Maksimum Geri Hız
+  var ACCEL = 0.0003;             // İvmelenme Hızı
+  var FRICTION = 0.96;            // Doğal Sürtünme (Tetik bırakılınca)
+  var BRAKE_FORCE = 0.88;         // Grip ile Hızlı Frenleme Gücü
+
+  var isThrottlePressed = false;
+  var isBrakePressed = false;
   var turnValue = 0;
-  var speed = 0;
 
   // Fizik & Tutma Değişkenleri
   var activeGrabber = null; 
@@ -207,26 +213,28 @@
     var rightTriggerPressed = false;
 
     if (session && session.inputSources) {
-      isMovingForward = false;
-      isMovingBackward = false;
+      isThrottlePressed = false;
+      isBrakePressed = false;
       turnValue = 0;
 
       for (var i = 0; i < session.inputSources.length; i++) {
         var source = session.inputSources[i];
         if (!source.gamepad) continue;
 
-        // Sağ Kumanda (Gaz / Fren)
+        // Sağ Kumanda (Gaz = Trigger / Fren & Geri = Grip)
         if (source.handedness === 'right') {
+          // Trigger (Button 0) - Gaz
           if (source.gamepad.buttons[0] && source.gamepad.buttons[0].value > 0.1) {
             rightTriggerPressed = true;
-            if (!activeGrabber) isMovingForward = true;
+            if (!activeGrabber) isThrottlePressed = true;
           }
+          // Grip (Button 1) - Fren / Geri Vites
           if (source.gamepad.buttons[1] && source.gamepad.buttons[1].value > 0.1) {
-            if (!activeGrabber) isMovingBackward = true;
+            if (!activeGrabber) isBrakePressed = true;
           }
         }
 
-        // Sol Kumanda (Kesintisiz Direksiyon)
+        // Sol Kumanda (Direksiyon)
         if (source.handedness === 'left') {
           var axes = source.gamepad.axes;
           if (axes && axes.length > 0) {
@@ -283,6 +291,7 @@
           lastControllerEuler.setFromQuaternion(controllerQuat, 'XYZ');
           velocity.set(0, 0, 0);
           angularVelocity.set(0, 0, 0);
+          currentSpeed = 0;
           isJustGrabbed = false;
         } else if (delta > 0) {
           velocity.subVectors(controllerPos, lastControllerPos).divideScalar(delta);
@@ -301,13 +310,12 @@
         carMesh.quaternion.copy(controllerQuat);
       }
     } 
-    // HAVADA VEYA ZEMİNDE FİZİK DÖNGÜSÜ
+    // SERBEST DÜŞÜŞ VE FİZİK
     else {
-      // 1. HAVADAYSA (Serbest Düşüş ve Takla)
+      // 1. HAVADAYSA
       if (carMesh.position.y > FLOOR_Y) {
         velocity.y += GRAVITY * delta;
 
-        // Havada serbest takla ve dönme açısı
         carMesh.rotation.x += angularVelocity.x * delta;
         carMesh.rotation.y += angularVelocity.y * delta;
         carMesh.rotation.z += angularVelocity.z * delta;
@@ -317,26 +325,31 @@
       carMesh.position.y += velocity.y * delta;
       carMesh.position.z += velocity.z * delta;
 
-      // 2. ZEMİNE ÇARPMA ANI (En Yakın Düzleme Devrilme Mantığı)
+      // 2. ZEMİNE ÇARPMA VE 4 YÖNLÜ DÜŞME FİZİĞİ (Düz, Ters, Sağ Yan, Sol Yan)
       if (carMesh.position.y <= FLOOR_Y) {
         carMesh.position.y = FLOOR_Y;
         velocity.y = 0;
 
         angularVelocity.multiplyScalar(0.05);
 
-        // Arabanın "Yukarı" Vektörünü Hesapla
-        var upVector = new THREE.Vector3(0, 1, 0);
-        upVector.applyQuaternion(carMesh.quaternion);
+        // Aracın Yön Vektörlerini Hesaplanması
+        var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
+        var rightVector = new THREE.Vector3(1, 0, 0).applyQuaternion(carMesh.quaternion);
 
-        // Hedef Yatay Açı (Zemin Düzlemi)
-        var targetRoll = 0; // Tavanı yukarı bakan normal durum
-        if (upVector.y < 0) {
-          targetRoll = Math.PI; // Ters çakıldıysa baş aşağı ters durur
+        var targetRoll = 0;
+        var targetPitch = 0;
+
+        // Yana Yatış Analizi (Sağ / Sol Yan)
+        if (Math.abs(rightVector.y) > 0.6) {
+          targetRoll = rightVector.y > 0 ? -Math.PI / 2 : Math.PI / 2; // Sağ veya Sol Yan
+        } 
+        // Düz veya Ters Yatış Analizi
+        else if (upVector.y < 0) {
+          targetRoll = Math.PI; // Tavan Üstü Ters
         }
 
-        // Açıyı en yakın yatay düzleme (Düz veya Ters) yumuşakça yatır
         var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
-        currentEuler.x = THREE.MathUtils.lerp(currentEuler.x, 0, 0.2);
+        currentEuler.x = THREE.MathUtils.lerp(currentEuler.x, targetPitch, 0.2);
         currentEuler.z = THREE.MathUtils.lerp(currentEuler.z, targetRoll, 0.2);
 
         carMesh.quaternion.setFromEuler(currentEuler);
@@ -345,38 +358,48 @@
         velocity.z *= 0.8;
       }
 
-      // 3. SÜRÜŞ KONTROLÜ (DÜZ VEYA TERS SÜRÜŞ)
-      var upVector = new THREE.Vector3(0, 1, 0);
-      upVector.applyQuaternion(carMesh.quaternion);
+      // 3. SÜRÜŞ VE İVMELENME DİNAMİKLERİ
+      var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
+      
+      // Sadece araç DÜZ durumdayken (Tekerlekler yerdeyken) sürüş aktif
+      var isUprightAndOnGround = upVector.y > 0.65;
 
-      // Yere temas ediyor mu ve tekerlekleri zemin izinde mi? (Düz veya Tam Ters Durumda)
-      var isStableOnGround = Math.abs(upVector.y) > 0.65;
-
-      if (carMesh.position.y <= FLOOR_Y + 0.005 && isStableOnGround) {
-        if (isMovingForward) {
-          speed = -0.006;
-        } else if (isMovingBackward) {
-          speed = 0.003;
-        } else {
-          speed = 0;
-        }
-
-        // DİREKSİYON (Sonsuz Dairesel Dönüş Düzeltmesi)
-        if (speed !== 0 && Math.abs(turnValue) > 0.05) {
-          var directionMultiplier = speed < 0 ? 1 : -1;
-          
-          // Eğer araba TERS devrildiyse direksiyon yönü tersine döner
-          if (upVector.y < 0) {
-            directionMultiplier *= -1;
+      if (carMesh.position.y <= FLOOR_Y + 0.005 && isUprightAndOnGround) {
+        
+        // --- GAZ (Trigger) MANTIĞI ---
+        if (isThrottlePressed) {
+          // İleri doğru kademeli ivmelenme
+          if (currentSpeed > MAX_SPEED_FORWARD) {
+            currentSpeed -= ACCEL;
           }
-
-          // Kilitlenme olmadan Y ekseninde bağımsız rotasyon birikimi
-          carMesh.rotateY(-turnValue * 0.06 * directionMultiplier);
+        } 
+        // --- FREN & GERİ (Grip) MANTIĞI ---
+        else if (isBrakePressed) {
+          // Eğer araç ileri gidiyorsa HIZLI FREN yap
+          if (currentSpeed < -0.0005) {
+            currentSpeed *= BRAKE_FORCE; 
+          } 
+          // Araç durduysa GERİ gitmeye başla
+          else if (currentSpeed < MAX_SPEED_BACKWARD) {
+            currentSpeed += ACCEL * 0.6; // Geri vites biraz daha yavaş ivmelenir
+          }
+        } 
+        // --- TETİK BIRAKILDIĞINDA DOĞAL SÜRTÜNME ---
+        else {
+          currentSpeed *= FRICTION;
+          if (Math.abs(currentSpeed) < 0.00005) currentSpeed = 0;
         }
 
-        carMesh.translateZ(speed);
+        // --- DİREKSİYON ---
+        if (currentSpeed !== 0 && Math.abs(turnValue) > 0.05) {
+          var directionMultiplier = currentSpeed < 0 ? 1 : -1;
+          carMesh.rotateY(-turnValue * 0.05 * directionMultiplier);
+        }
+
+        carMesh.translateZ(currentSpeed);
       } else {
-        speed = 0;
+        // Havada veya Yan/Ters duruyorsa tekerlekler boşa döner, ivme sıfırlanır
+        currentSpeed = 0;
       }
     }
 
