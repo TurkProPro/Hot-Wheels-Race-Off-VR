@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Acceleracers Reverb (1:64 Scale)</title>
+  <title>Hot Wheels MR - Acceleracers Reverb (Fix Axis & Scale)</title>
   <style>
     body {
       margin: 0;
@@ -52,7 +52,7 @@
 
 <script>
   var scene, camera, renderer;
-  var carMesh; // Fizik ve tutma işlemleri için kullanılan kapsayıcı (Hitbox)
+  var carMesh; // Fizik ve tutma kapsayıcısı (Hitbox)
 
   // Kontrol Değişkenleri
   var isMovingForward = false;
@@ -71,8 +71,8 @@
   var lastControllerEuler = new THREE.Euler(0, 0, 0);
   
   var GRAVITY = -9.81;
-  var FLOOR_Y = 0.005; // 1:64 ölçek için basık zemin yüksekliği
-  var GRAB_RADIUS = 0.03; // 3 cm hassas temas mesafesi
+  var FLOOR_Y = 0.008; // Otomatik boyutlandırmaya göre taban payı
+  var GRAB_RADIUS = 0.05; // 5 cm tutma mesafesi
 
   var leftController = null;
   var rightController = null;
@@ -123,8 +123,8 @@
     dirLight.position.set(1, 3, 2);
     scene.add(dirLight);
 
-    // 1:64 ÖLÇEKLİ HITBOX (Yaklaşık 7cm boyunda)
-    var hitboxGeometry = new THREE.BoxGeometry(0.028, 0.018, 0.068);
+    // Birebir Hot Wheels Ebatında Hitbox Kutu (Genişlik: 3cm, Yükseklik: 2cm, Uzunluk: 7cm)
+    var hitboxGeometry = new THREE.BoxGeometry(0.03, 0.02, 0.07);
     var hitboxMaterial = new THREE.MeshBasicMaterial({ visible: false });
     carMesh = new THREE.Mesh(hitboxGeometry, hitboxMaterial);
     carMesh.position.set(0, FLOOR_Y, -0.4);
@@ -137,8 +137,21 @@
     loader.load('car_model.glb', function(gltf) {
       var reverbModel = gltf.scene;
 
-      // --- 1:64 HOT WHEELS ÖLÇEĞİ ---
-      reverbModel.scale.set(0.005, 0.005, 0.005); 
+      // 1. EKSEN DÜZELTME (Araba yana gidiyorsa model yönünü 90 derece döndür)
+      reverbModel.rotation.y = Math.PI / 2; // Eğer araba tam tersi yöne giderse -Math.PI / 2 yapabilirsin.
+
+      // 2. OTOMATİK HOT WHEELS BOYUTLANDIRMASI (Tam 7 cm uzunluk)
+      var bboxInitial = new THREE.Box3().setFromObject(reverbModel);
+      var currentLength = bboxInitial.max.z - bboxInitial.min.z;
+      
+      // Eğer Z ekseni yerine X ekseni uzunsa onu baz al
+      if ((bboxInitial.max.x - bboxInitial.min.x) > currentLength) {
+        currentLength = bboxInitial.max.x - bboxInitial.min.x;
+      }
+
+      var targetLength = 0.07; // 7 cm (Gerçek Hot Wheels Ölçeği)
+      var targetScale = targetLength / currentLength;
+      reverbModel.scale.set(targetScale, targetScale, targetScale);
 
       // Gölgeler
       reverbModel.traverse(function(child) {
@@ -148,9 +161,9 @@
         }
       });
 
-      // Tabanı zemine hizala
-      var bbox = new THREE.Box3().setFromObject(reverbModel);
-      reverbModel.position.y = -bbox.min.y - (0.018 / 2); 
+      // Tabanı Zeminle Sıfırla
+      var bboxFinal = new THREE.Box3().setFromObject(reverbModel);
+      reverbModel.position.y = -bboxFinal.min.y - 0.01; 
 
       carMesh.add(reverbModel);
       loadingText.style.display = 'none';
@@ -161,8 +174,8 @@
         loadingText.innerText = 'Araba Yükleniyor... %' + percent;
       }
     }, function(error) {
-      console.error('GLB model yüklenirken hata oluştu:', error);
-      loadingText.innerText = 'GLB Dosyası Yüklenemedi! Dosya adını kontrol edin.';
+      console.error('GLB yüklenirken hata:', error);
+      loadingText.innerText = 'GLB Yüklenemedi! Dosya adını kontrol edin.';
     });
 
     // Kumandalar
@@ -217,12 +230,14 @@
           }
         }
 
-        // Sol Kumanda (Direksiyon)
+        // Sol Kumanda (Direksiyon Kontrol Düzeltmesi)
         if (source.handedness === 'left') {
-          if (source.gamepad.axes.length >= 2) {
-            var axisVal = source.gamepad.axes[2] !== undefined ? source.gamepad.axes[2] : source.gamepad.axes[0];
-            if (Math.abs(axisVal) > 0.1) {
-              turnValue = axisVal;
+          var axes = source.gamepad.axes;
+          if (axes && axes.length > 0) {
+            // Quest ve diğer headset'lerde X eksenini tara (0 veya 2. indekstir)
+            var axisX = axes.length >= 4 ? axes[2] : axes[0];
+            if (Math.abs(axisX) > 0.05) { // Hassasiyet eşiği artırıldı
+              turnValue = axisX;
             }
           }
 
@@ -291,7 +306,7 @@
         carMesh.quaternion.copy(controllerQuat);
       }
     } 
-    // SERBEST DÜŞÜŞ VE FİZİK
+    // SERBEST DÜŞÜŞ VE SÜRÜŞ FİZİĞİ
     else {
       if (carMesh.position.y > FLOOR_Y) {
         velocity.y += GRAVITY * delta;
@@ -335,9 +350,10 @@
           speed = 0;
         }
 
-        if (speed !== 0 && Math.abs(turnValue) > 0.1) {
+        // DİREKSİYON DÖNÜŞ DÜZELTMESİ
+        if (speed !== 0 && Math.abs(turnValue) > 0.05) {
           var directionMultiplier = speed < 0 ? 1 : -1;
-          carMesh.rotation.y -= turnValue * 0.08 * directionMultiplier;
+          carMesh.rotation.y -= turnValue * 0.06 * directionMultiplier;
         }
 
         carMesh.translateZ(speed);
