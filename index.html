@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Physics & Brightness Update</title>
+  <title>Hot Wheels MR - Steering & Speed Fix Update</title>
   <style>
     body {
       margin: 0;
@@ -69,6 +69,7 @@
   var activeGrabber = null; 
   var isJustGrabbed = false;
   var wasGroundedLastFrame = true;
+  var wasGrabbedLastFrame = false;
 
   var velocity = new THREE.Vector3(0, 0, 0); 
   var angularVelocity = new THREE.Vector3(0, 0, 0); 
@@ -85,6 +86,8 @@
   var BOUNCE_THRESHOLD = 0.20;    
   var GRAB_RADIUS = 0.12; 
 
+  var downRaycaster = new THREE.Raycaster();
+
   // Kumandalar
   var controller0 = null;
   var controller1 = null;
@@ -92,7 +95,7 @@
   var rightController = null;
   var isSpawnedAtUser = false;
 
-  // Menü & Mod Değişkenleri
+  // Menü Değişkenleri
   var isMenuOpen = false;
   var selectedMenuIndex = 0; 
   var activeMode = "NONE";   
@@ -117,8 +120,10 @@
   var selectedHitboxIndex = 0; 
   var selectedColorIndex = 0;  
   var currentOpacity = 0.50;   
-  var currentBrightness = 0.30; // Parlaklık (Emissive Intensity) 0.0 - 1.0
-  var activeSubSelection = 0;  // 0: Renkler, 1: Opacity Slider, 2: Brightness Slider
+  var currentBrightness = 0.30; 
+  var rotX = 0, rotY = 0, rotZ = 0;
+
+  var activeSubSelection = 0;  
 
   var rainbowPalette = [
     { name: "Gri (Default)", hex: 0x888888, str: "#888888" },
@@ -198,7 +203,6 @@
     });
   });
 
-  // MENÜ ARAYÜZ ÇİZİMİ
   function updateMenuTexture() {
     ctxMenu.fillStyle = 'rgba(15, 15, 20, 0.95)';
     ctxMenu.fillRect(0, 0, 512, 512);
@@ -208,11 +212,10 @@
     ctxMenu.strokeRect(5, 5, 502, 502);
 
     ctxMenu.fillStyle = '#00ffcc';
-    ctxMenu.font = 'bold 34px sans-serif';
+    ctxMenu.font = 'bold 32px sans-serif';
     ctxMenu.textAlign = 'center';
-    ctxMenu.fillText('AYARLAR MENÜSÜ', 256, 50);
+    ctxMenu.fillText('AYARLAR MENÜSÜ', 256, 45);
 
-    // 1. ANA MENÜ (3 SEÇENEKLİ)
     if (activeMode === "NONE") {
       var items = ["1. Zemin Yüksekliği", "2. Kutu (Hitbox) Ekle", "3. Kutu (Hitbox) Düzenle"];
       for (var i = 0; i < 3; i++) {
@@ -233,11 +236,9 @@
       ctxMenu.font = '20px sans-serif';
       ctxMenu.fillText('Gezin: Sol Stick | Seç: [ X ]', 256, 450);
 
-    } 
-    // 2. ZEMİN AYARI
-    else if (activeMode === "LEVELING") {
+    } else if (activeMode === "LEVELING") {
       ctxMenu.fillStyle = '#ffcc00';
-      ctxMenu.font = 'bold 32px sans-serif';
+      ctxMenu.font = 'bold 30px sans-serif';
       ctxMenu.fillText('ZEMİN YÜKSEKLİĞİ AYARI', 256, 140);
       ctxMenu.fillStyle = '#ffffff';
       ctxMenu.font = '24px sans-serif';
@@ -245,40 +246,34 @@
       ctxMenu.fillStyle = '#00ffcc';
       ctxMenu.fillText('Kaydet ve Çık: [ X ]', 256, 330);
 
-    } 
-    // 3. HITBOX NOKTA 1
-    else if (activeMode === "HITBOX_P1") {
+    } else if (activeMode === "HITBOX_P1") {
       ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 30px sans-serif';
-      ctxMenu.fillText('HITBOX: 1. NOKTA', 256, 120);
+      ctxMenu.font = 'bold 28px sans-serif';
+      ctxMenu.fillText('HITBOX: 1. NOKTA', 256, 110);
       ctxMenu.fillStyle = '#ffffff';
       ctxMenu.font = '22px sans-serif';
-      ctxMenu.fillText('1. Sağ Trigger ile Nokta Koy', 256, 190);
-      ctxMenu.fillText('2. Sol Stick: X/Z Kaydır', 256, 230);
-      ctxMenu.fillText('3. Sağ Stick: Yüksekliği Ayarla', 256, 270);
+      ctxMenu.fillText('1. Sağ Trigger ile Nokta Koy', 256, 180);
+      ctxMenu.fillText('2. Sol Stick: X/Z Kaydır', 256, 220);
+      ctxMenu.fillText('3. Sağ Stick: Yüksekliği Ayarla', 256, 260);
       ctxMenu.fillStyle = '#ffcc00';
-      ctxMenu.fillText('Onayla ve Devam Et: [ A ]', 256, 350);
+      ctxMenu.fillText('Onayla ve Devam Et: [ A ]', 256, 340);
 
-    } 
-    // 4. HITBOX NOKTA 2
-    else if (activeMode === "HITBOX_P2") {
+    } else if (activeMode === "HITBOX_P2") {
       ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 30px sans-serif';
-      ctxMenu.fillText('HITBOX: 2. NOKTA', 256, 120);
+      ctxMenu.font = 'bold 28px sans-serif';
+      ctxMenu.fillText('HITBOX: 2. NOKTA', 256, 110);
       ctxMenu.fillStyle = '#ffffff';
       ctxMenu.font = '22px sans-serif';
-      ctxMenu.fillText('1. Çapraz İkinci Noktayı Koy', 256, 190);
-      ctxMenu.fillText('2. Sol Stick: X/Z Kaydır', 256, 230);
-      ctxMenu.fillText('3. Sağ Stick: Yüksekliği Ayarla', 256, 270);
+      ctxMenu.fillText('1. Çapraz İkinci Noktayı Koy', 256, 180);
+      ctxMenu.fillText('2. Sol Stick: X/Z Kaydır', 256, 220);
+      ctxMenu.fillText('3. Sağ Stick: Yüksekliği Ayarla', 256, 260);
       ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.fillText('Kutuyu Oluştur: [ A ]', 256, 350);
+      ctxMenu.fillText('Kutuyu Oluştur: [ A ]', 256, 340);
 
-    } 
-    // 5. HITBOX LİSTESİ
-    else if (activeMode === "HITBOX_LIST") {
+    } else if (activeMode === "HITBOX_LIST") {
       ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 30px sans-serif';
-      ctxMenu.fillText('MEVCUT HITBOX\'LAR', 256, 100);
+      ctxMenu.font = 'bold 28px sans-serif';
+      ctxMenu.fillText('MEVCUT HITBOX\'LAR', 256, 95);
 
       if (customHitboxes.length === 0) {
         ctxMenu.fillStyle = '#ff3366';
@@ -289,7 +284,7 @@
         var endIdx = Math.min(customHitboxes.length, startIdx + 3);
 
         for (var i = startIdx; i < endIdx; i++) {
-          var yPos = 140 + ((i - startIdx) * 70);
+          var yPos = 135 + ((i - startIdx) * 70);
           if (i === selectedHitboxIndex) {
             ctxMenu.fillStyle = '#00ffcc';
             ctxMenu.fillRect(50, yPos, 412, 55);
@@ -306,14 +301,12 @@
 
       ctxMenu.fillStyle = '#aaaaaa';
       ctxMenu.font = '19px sans-serif';
-      ctxMenu.fillText('[ A ] Düzenle  |  [ B ] Sil', 256, 415);
+      ctxMenu.fillText('[ A ] Düzenle / Eğim Ver  |  [ B ] Sil', 256, 415);
       ctxMenu.fillText('Çıkış: [ X ]', 256, 450);
 
-    } 
-    // 6. SİLME ONAYI
-    else if (activeMode === "CONFIRM_DELETE") {
+    } else if (activeMode === "CONFIRM_DELETE") {
       ctxMenu.fillStyle = '#ff3366';
-      ctxMenu.font = 'bold 32px sans-serif';
+      ctxMenu.font = 'bold 30px sans-serif';
       ctxMenu.fillText('EMİN MİSİNİZ?', 256, 140);
       ctxMenu.fillStyle = '#ffffff';
       ctxMenu.font = '24px sans-serif';
@@ -324,18 +317,15 @@
       ctxMenu.fillStyle = '#ff3366';
       ctxMenu.fillText('[ B ] Hayır, İptal', 256, 350);
 
-    } 
-    // 7. RENK, ŞEFFAFLIK VE PARLAKLIK DÜZENLEME
-    else if (activeMode === "HITBOX_COLOR_EDIT") {
+    } else if (activeMode === "HITBOX_COLOR_EDIT") {
       ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.font = 'bold 24px sans-serif';
-      ctxMenu.fillText('HITBOX ' + (selectedHitboxIndex + 1) + ' GÖRÜNÜM AYARI', 256, 75);
+      ctxMenu.font = 'bold 22px sans-serif';
+      ctxMenu.fillText('HITBOX ' + (selectedHitboxIndex + 1) + ' ÖZELLİK & EĞİM AYARI', 256, 70);
 
-      // 9 Renk Kutucuğu (3x3 Grid)
-      var startX = 146;
-      var startY = 95;
-      var boxSize = 60;
-      var gap = 12;
+      var startX = 166;
+      var startY = 85;
+      var boxSize = 48;
+      var gap = 10;
 
       for (var r = 0; r < 9; r++) {
         var col = r % 3;
@@ -348,61 +338,63 @@
 
         if (r === selectedColorIndex && activeSubSelection === 0) {
           ctxMenu.strokeStyle = '#ffffff';
-          ctxMenu.lineWidth = 5;
-          ctxMenu.strokeRect(bx - 3, by - 3, boxSize + 6, boxSize + 6);
+          ctxMenu.lineWidth = 4;
+          ctxMenu.strokeRect(bx - 2, by - 2, boxSize + 4, boxSize + 4);
         } else {
           ctxMenu.strokeStyle = '#000000';
-          ctxMenu.lineWidth = 2;
+          ctxMenu.lineWidth = 1;
           ctxMenu.strokeRect(bx, by, boxSize, boxSize);
         }
       }
 
-      // 1. Slider: Şeffaflık (Opacity)
-      var slider1Y = 330;
+      drawSlider(265, "Şeffaflık: %" + Math.round(currentOpacity * 100), (currentOpacity - 0.1) / 0.9, activeSubSelection === 1);
+      drawSlider(325, "Parlaklık: %" + Math.round(currentBrightness * 100), currentBrightness, activeSubSelection === 2);
+
       ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = '17px sans-serif';
-      ctxMenu.fillText('Şeffaflık: %' + Math.round(currentOpacity * 100), 256, slider1Y - 8);
-
-      ctxMenu.fillStyle = '#333333';
-      ctxMenu.fillRect(80, slider1Y, 352, 16);
-
-      var fillW1 = (currentOpacity - 0.1) / (1.0 - 0.1) * 352;
-      ctxMenu.fillStyle = activeSubSelection === 1 ? '#ffcc00' : '#00ffcc';
-      ctxMenu.fillRect(80, slider1Y, fillW1, 16);
-
-      if (activeSubSelection === 1) {
-        ctxMenu.strokeStyle = '#ffffff';
-        ctxMenu.lineWidth = 3;
-        ctxMenu.strokeRect(76, slider1Y - 3, 360, 22);
-      }
-
-      // 2. Slider: Parlaklık (Brightness / Emissive)
-      var slider2Y = 400;
-      ctxMenu.fillStyle = '#ffffff';
-      ctxMenu.font = '17px sans-serif';
-      ctxMenu.fillText('Parlaklık (Işık/Glow): %' + Math.round(currentBrightness * 100), 256, slider2Y - 8);
-
-      ctxMenu.fillStyle = '#333333';
-      ctxMenu.fillRect(80, slider2Y, 352, 16);
-
-      var fillW2 = (currentBrightness - 0.0) / (1.0 - 0.0) * 352;
-      ctxMenu.fillStyle = activeSubSelection === 2 ? '#ffcc00' : '#00ffcc';
-      ctxMenu.fillRect(80, slider2Y, fillW2, 16);
-
-      if (activeSubSelection === 2) {
-        ctxMenu.strokeStyle = '#ffffff';
-        ctxMenu.lineWidth = 3;
-        ctxMenu.strokeRect(76, slider2Y - 3, 360, 22);
-      }
-
-      ctxMenu.fillStyle = '#aaaaaa';
       ctxMenu.font = '16px sans-serif';
-      ctxMenu.fillText('Stick Sağ/Sol: Ayarla | Alt/Üst: Seçenek Değiştir', 256, 455);
+
+      drawOptionRow(380, "Eğim X (Pitch): " + rotX + "°", activeSubSelection === 3);
+      drawOptionRow(415, "Eğim Y (Yaw): " + rotY + "°", activeSubSelection === 4);
+      drawOptionRow(450, "Eğim Z (Roll): " + rotZ + "°", activeSubSelection === 5);
+
       ctxMenu.fillStyle = '#00ffcc';
-      ctxMenu.fillText('Kaydet ve Çık: [ X ]', 256, 485);
+      ctxMenu.font = '15px sans-serif';
+      ctxMenu.fillText('Sol Stick Sağ/Sol: Ayarla | Alt/Üst: Seçenek | [ X ] Kaydet', 256, 490);
     }
 
     textureMenu.needsUpdate = true;
+  }
+
+  function drawSlider(y, label, percent, isSelected) {
+    ctxMenu.fillStyle = '#ffffff';
+    ctxMenu.font = '15px sans-serif';
+    ctxMenu.fillText(label, 256, y - 5);
+
+    ctxMenu.fillStyle = '#333333';
+    ctxMenu.fillRect(90, y, 332, 14);
+
+    ctxMenu.fillStyle = isSelected ? '#ffcc00' : '#00ffcc';
+    ctxMenu.fillRect(90, y, percent * 332, 14);
+
+    if (isSelected) {
+      ctxMenu.strokeStyle = '#ffffff';
+      ctxMenu.lineWidth = 2;
+      ctxMenu.strokeRect(87, y - 2, 338, 18);
+    }
+  }
+
+  function drawOptionRow(y, label, isSelected) {
+    if (isSelected) {
+      ctxMenu.fillStyle = '#ffcc00';
+      ctxMenu.fillRect(100, y - 18, 312, 26);
+      ctxMenu.fillStyle = '#000000';
+      ctxMenu.font = 'bold 16px sans-serif';
+      ctxMenu.fillText('> ' + label + ' <', 256, y);
+    } else {
+      ctxMenu.fillStyle = '#ffffff';
+      ctxMenu.font = '15px sans-serif';
+      ctxMenu.fillText(label, 256, y);
+    }
   }
 
   function initThreeJS(session) {
@@ -507,8 +499,12 @@
     scene.add(boxMesh);
     hitboxVisuals.push(boxMesh);
 
-    var box3 = new THREE.Box3(new THREE.Vector3(minX, minY, minZ), new THREE.Vector3(maxX, maxY, maxZ));
-    customHitboxes.push(box3);
+    customHitboxes.push({
+      mesh: boxMesh,
+      rotX: 0,
+      rotY: 0,
+      rotZ: 0
+    });
   }
 
   function removeHitbox(index) {
@@ -522,16 +518,27 @@
     }
   }
 
-  function updateHitboxAppearance(index, colorHex, opacity, brightness) {
+  function updateHitboxAppearance(index, colorHex, opacity, brightness, rx, ry, rz) {
     if (index >= 0 && index < hitboxVisuals.length) {
       var boxMesh = hitboxVisuals[index];
       boxMesh.material.color.setHex(colorHex);
       boxMesh.material.emissive.setHex(colorHex);
       boxMesh.material.emissiveIntensity = brightness;
       boxMesh.material.opacity = opacity;
+      
+      boxMesh.rotation.set(
+        THREE.MathUtils.degToRad(rx),
+        THREE.MathUtils.degToRad(ry),
+        THREE.MathUtils.degToRad(rz)
+      );
+
       if (boxMesh.children.length > 0) {
         boxMesh.children[0].material.color.setHex(colorHex);
       }
+
+      customHitboxes[index].rotX = rx;
+      customHitboxes[index].rotY = ry;
+      customHitboxes[index].rotZ = rz;
     }
   }
 
@@ -584,7 +591,6 @@
       }
     }
 
-    // Hitbox Vurgulama Animasyonu
     if (isMenuOpen && activeMode === "HITBOX_LIST" && customHitboxes.length > 0) {
       for (var h = 0; h < hitboxVisuals.length; h++) {
         if (h === selectedHitboxIndex) {
@@ -635,7 +641,6 @@
             }
           }
 
-          // [ A ] Tuşu
           var aBtnPressed = (btns[4] && btns[4].pressed);
           if (aBtnPressed && !aButtonPressedLastFrame) {
             if (activeMode === "HITBOX_P1" && point1) {
@@ -649,6 +654,10 @@
               activeMode = "NONE";
               updateMenuTexture();
             } else if (activeMode === "HITBOX_LIST" && customHitboxes.length > 0) {
+              var hb = customHitboxes[selectedHitboxIndex];
+              rotX = hb.rotX;
+              rotY = hb.rotY;
+              rotZ = hb.rotZ;
               activeMode = "HITBOX_COLOR_EDIT";
               updateMenuTexture();
             } else if (activeMode === "CONFIRM_DELETE") {
@@ -661,7 +670,6 @@
           }
           aButtonPressedLastFrame = aBtnPressed;
 
-          // [ B ] Tuşu
           var bBtnPressed = (btns[5] && btns[5].pressed);
           if (bBtnPressed && !bButtonPressedLastFrame) {
             if (activeMode === "HITBOX_LIST" && customHitboxes.length > 0) {
@@ -674,7 +682,6 @@
           }
           bButtonPressedLastFrame = bBtnPressed;
 
-          // Nokta Koyma Trigger
           if (rightTriggerPressed && !rightTriggerPressedLastFrame && rightController) {
             var rightPos = new THREE.Vector3();
             rightController.getWorldPosition(rightPos);
@@ -691,7 +698,6 @@
           }
           rightTriggerPressedLastFrame = rightTriggerPressed;
 
-          // Sağ Stick Yükseklik Ayarı
           if ((activeMode === "HITBOX_P1" || activeMode === "HITBOX_P2") && axes && axes.length > 0) {
             var rAxisY = axes.length >= 4 ? axes[3] : axes[1];
             var currentPoint = (activeMode === "HITBOX_P1") ? point1 : point2;
@@ -704,8 +710,6 @@
 
         // --- SOL KUMANDA ---
         if (source.handedness === 'left') {
-
-          // Y Tuşu (Menü Aç/Kapa)
           var yBtnPressed = (btns[5] && btns[5].pressed);
           if (yBtnPressed && !menuButtonPressedLastFrame) {
             isMenuOpen = !isMenuOpen;
@@ -718,7 +722,6 @@
           }
           menuButtonPressedLastFrame = yBtnPressed;
 
-          // [ X ] Tuşu
           var xBtnPressed = (btns[4] && btns[4].pressed);
           if (xBtnPressed && !xButtonPressedLastFrame && isMenuOpen) {
             if (activeMode === "NONE") {
@@ -728,19 +731,17 @@
             } else if (activeMode === "LEVELING" || activeMode === "HITBOX_LIST") {
               activeMode = "NONE";
             } else if (activeMode === "HITBOX_COLOR_EDIT") {
-              updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness);
+              updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
               activeMode = "HITBOX_LIST";
             }
             updateMenuTexture();
           }
           xButtonPressedLastFrame = xBtnPressed;
 
-          // Sol Stick Gezinme
           if (axes && axes.length > 0) {
             var axisX = axes.length >= 4 ? axes[2] : axes[0];
             var axisY = axes.length >= 4 ? axes[3] : axes[1];
 
-            // 1. ANA MENÜ
             if (isMenuOpen && activeMode === "NONE") {
               if (Math.abs(axisY) > 0.5 && !stickNavCooldown) {
                 if (axisY > 0.5) selectedMenuIndex = (selectedMenuIndex + 1) % 3;
@@ -751,7 +752,6 @@
                 stickNavCooldown = false;
               }
             } 
-            // 2. HITBOX LİSTESİ
             else if (isMenuOpen && activeMode === "HITBOX_LIST") {
               if (Math.abs(axisY) > 0.5 && !stickNavCooldown && customHitboxes.length > 0) {
                 if (axisY > 0.5) selectedHitboxIndex = (selectedHitboxIndex + 1) % customHitboxes.length;
@@ -762,11 +762,9 @@
                 stickNavCooldown = false;
               }
             }
-            // 3. RENK, ŞEFFAFLIK VE PARLAKLIK KONTROLÜ
             else if (isMenuOpen && activeMode === "HITBOX_COLOR_EDIT") {
-              // Alt / Üst Geçişi (0: Renkler, 1: Opacity, 2: Brightness)
               if (Math.abs(axisY) > 0.6 && !stickNavCooldown) {
-                if (axisY > 0.6) activeSubSelection = Math.min(2, activeSubSelection + 1);
+                if (axisY > 0.6) activeSubSelection = Math.min(5, activeSubSelection + 1);
                 if (axisY < -0.6) activeSubSelection = Math.max(0, activeSubSelection - 1);
                 stickNavCooldown = true;
                 updateMenuTexture();
@@ -774,38 +772,57 @@
                 stickNavCooldown = false;
               }
 
-              // Renk Kutuları
               if (activeSubSelection === 0 && Math.abs(axisX) > 0.5 && !stickNavCooldown) {
                 if (axisX > 0.5) selectedColorIndex = (selectedColorIndex + 1) % 9;
                 if (axisX < -0.5) selectedColorIndex = (selectedColorIndex - 1 + 9) % 9;
                 stickNavCooldown = true;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness);
+                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
                 updateMenuTexture();
               }
 
-              // Opacity Slider
               if (activeSubSelection === 1 && Math.abs(axisX) > 0.1) {
                 currentOpacity += axisX * 0.01;
                 if (currentOpacity < 0.1) currentOpacity = 0.1;
                 if (currentOpacity > 1.0) currentOpacity = 1.0;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness);
+                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
                 updateMenuTexture();
               }
 
-              // Brightness Slider
               if (activeSubSelection === 2 && Math.abs(axisX) > 0.1) {
                 currentBrightness += axisX * 0.01;
                 if (currentBrightness < 0.0) currentBrightness = 0.0;
                 if (currentBrightness > 1.0) currentBrightness = 1.0;
-                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness);
+                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, rotX, rotY, rotZ);
+                updateMenuTexture();
+              }
+
+              if (activeSubSelection === 3 && Math.abs(axisX) > 0.1) {
+                rotX += axisX * 1.5;
+                if (rotX < -180) rotX += 360;
+                if (rotX > 180) rotX -= 360;
+                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                updateMenuTexture();
+              }
+
+              if (activeSubSelection === 4 && Math.abs(axisX) > 0.1) {
+                rotY += axisX * 1.5;
+                if (rotY < -180) rotY += 360;
+                if (rotY > 180) rotY -= 360;
+                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
+                updateMenuTexture();
+              }
+
+              if (activeSubSelection === 5 && Math.abs(axisX) > 0.1) {
+                rotZ += axisX * 1.5;
+                if (rotZ < -180) rotZ += 360;
+                if (rotZ > 180) rotZ -= 360;
+                updateHitboxAppearance(selectedHitboxIndex, rainbowPalette[selectedColorIndex].hex, currentOpacity, currentBrightness, Math.round(rotX), Math.round(rotY), Math.round(rotZ));
                 updateMenuTexture();
               }
             }
-            // 4. ZEMİN AYARI
             else if (isMenuOpen && activeMode === "LEVELING") {
               if (Math.abs(axisY) > 0.1) FLOOR_Y -= axisY * 0.002; 
             } 
-            // 5. HITBOX NOKTASI MİLİMETRİK KAYDIRMA
             else if (isMenuOpen && (activeMode === "HITBOX_P1" || activeMode === "HITBOX_P2")) {
               var targetPoint = (activeMode === "HITBOX_P1") ? point1 : point2;
               if (targetPoint) {
@@ -814,7 +831,6 @@
                 tempPointMarker.position.copy(targetPoint);
               }
             } 
-            // 6. NORMAL SÜRÜŞ DÖNÜŞÜ
             else if (!isMenuOpen) {
               if (Math.abs(axisX) > 0.05) {
                 turnValue = axisX;
@@ -863,6 +879,7 @@
     }
 
     if (activeGrabber) {
+      wasGrabbedLastFrame = true;
       var activeController = (activeGrabber === 'left') ? leftController : rightController;
 
       if (activeController) {
@@ -897,45 +914,46 @@
       }
     } 
     else {
+      if (wasGrabbedLastFrame) {
+        wasGrabbedLastFrame = false;
+        wasGroundedLastFrame = false;
+      }
+
       var upVector = new THREE.Vector3(0, 1, 0).applyQuaternion(carMesh.quaternion);
       var isUpright = upVector.y > 0;
       var carHeightOffset = isUpright ? CAR_HEIGHT_UPRIGHT : CAR_HEIGHT_UPSIDEDOWN;
 
       var effectiveFloorY = FLOOR_Y;
-      var isStandingOnHitbox = false;
 
-      for (var h = 0; h < customHitboxes.length; h++) {
-        var box = customHitboxes[h];
-        if (carMesh.position.x >= box.min.x && carMesh.position.x <= box.max.x &&
-            carMesh.position.z >= box.min.z && carMesh.position.z <= box.max.z) {
-          
-          if (box.max.y > effectiveFloorY && carMesh.position.y >= box.max.y - 0.02) {
-            effectiveFloorY = box.max.y;
-            isStandingOnHitbox = true;
+      if (hitboxVisuals.length > 0) {
+        var rayOrigin = carMesh.position.clone();
+        rayOrigin.y += 0.05; 
+        downRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
+
+        var intersects = downRaycaster.intersectObjects(hitboxVisuals, false);
+        if (intersects.length > 0) {
+          var topHit = intersects[0];
+          if (topHit.distance <= 0.15 && topHit.point.y > effectiveFloorY) {
+            effectiveFloorY = topHit.point.y;
           }
         }
       }
 
       var currentMinY = effectiveFloorY + carHeightOffset;
-      var isGroundedNow = (carMesh.position.y <= currentMinY + 0.001);
+      var isGroundedNow = (carMesh.position.y <= currentMinY + 0.002);
 
-      // --- PLATFORMDAN/HITBOX'TAN DÜŞÜŞ FİZİĞİ ---
       if (wasGroundedLastFrame && !isGroundedNow && carMesh.position.y > FLOOR_Y + CAR_HEIGHT_UPRIGHT) {
-        // İleri sürüş momentumunu serbest düşüş X/Z vektörüne aktar
         var forwardVec = new THREE.Vector3(0, 0, currentSpeed).applyQuaternion(carMesh.quaternion);
         velocity.x = forwardVec.x / delta;
         velocity.z = forwardVec.z / delta;
 
-        // Videodaki gibi platform sınırından geçerken ön burun düşüş torku ekle (Pitch Roll Torku)
         var pitchTorque = (currentSpeed < 0 ? -1 : 1) * 3.5; 
         angularVelocity.x = pitchTorque;
-        
-        currentSpeed = 0; // Yerel gaz hızını havada sıfırla, fizik momentumu devralır
+        currentSpeed = 0; 
       }
 
       wasGroundedLastFrame = isGroundedNow;
 
-      // HAVADA SÜZÜLME & SERBEST DÜŞÜŞ
       if (carMesh.position.y > currentMinY || velocity.y > 0) {
         velocity.y += GRAVITY * delta;
 
@@ -948,7 +966,6 @@
         carMesh.position.z += velocity.z * delta;
       }
 
-      // ZEMİNE/PLATFORMA TEMAS & ÇARPIŞMA
       if (carMesh.position.y <= currentMinY) {
         carMesh.position.y = currentMinY;
 
@@ -1000,9 +1017,15 @@
               if (Math.abs(currentSpeed) < 0.00005) currentSpeed = 0;
             }
 
+            // GÜNCELLENEN DİREKSİYON VE DÖNÜŞ FİZİĞİ:
             if (currentSpeed !== 0 && Math.abs(turnValue) > 0.02) {
+              var speedRatio = Math.abs(currentSpeed) / Math.abs(MAX_SPEED_FORWARD);
+              
+              // Araba yavaşladıkça dönüş açısı yumuşatılarak küçültülür
+              var effectiveTurn = turnValue * Math.pow(speedRatio, 0.5); 
               var directionMultiplier = currentSpeed < 0 ? 1 : -1;
-              carMesh.rotateY(-turnValue * 0.06 * directionMultiplier);
+              
+              carMesh.rotateY(-effectiveTurn * 0.045 * directionMultiplier);
             }
 
             carMesh.translateZ(currentSpeed);
