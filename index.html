@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Hot Wheels MR - Glitch-Free Fixed Physics</title>
+  <title>Hot Wheels MR - Stable Physics & Steering Fix</title>
   <style>
     body {
       margin: 0;
@@ -64,6 +64,7 @@
   var isThrottlePressed = false;
   var isBrakePressed = false;
   var turnValue = 0;
+  var STICK_DEADZONE = 0.15; // Kendi kendine dönmeyi önleyen ölü bölge
 
   // Fizik Değişkenleri
   var activeGrabber = null; 
@@ -454,7 +455,6 @@
       carMesh.add(loadedReverbModel);
     }
 
-    // Önizleme Kutusu
     var prevGeo = new THREE.BoxGeometry(1, 1, 1);
     var prevMat = new THREE.MeshStandardMaterial({
       color: 0x00ff00,
@@ -472,7 +472,6 @@
     previewBoxMesh.add(line);
     scene.add(previewBoxMesh);
 
-    // Markerlar
     for (var m = 0; m < 2; m++) {
       var pointGeo = new THREE.SphereGeometry(0.012, 16, 16);
       var pointMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
@@ -637,6 +636,7 @@
 
   function smoothAlignToFloor(isUpsideDown, factor) {
     var currentEuler = new THREE.Euler().setFromQuaternion(carMesh.quaternion, 'YXZ');
+    // Pitch ve Roll açılarını tamamen temizleyip Y-Yaw açısını korur
     var targetEuler = new THREE.Euler(0, currentEuler.y, isUpsideDown ? Math.PI : 0, 'YXZ');
     var targetQuat = new THREE.Quaternion().setFromEuler(targetEuler);
 
@@ -673,11 +673,12 @@
     var leftTriggerPressed = false;
     var rightTriggerPressed = false;
 
-    if (session && session.inputSources) {
-      isThrottlePressed = false;
-      isBrakePressed = false;
-      turnValue = 0;
+    // Girdileri her karede sıfırla
+    isThrottlePressed = false;
+    isBrakePressed = false;
+    turnValue = 0;
 
+    if (session && session.inputSources) {
       for (var i = 0; i < session.inputSources.length; i++) {
         var source = session.inputSources[i];
         if (!source.gamepad) continue;
@@ -751,7 +752,6 @@
           }
           bButtonPressedLastFrame = bBtnPressed;
 
-          // 2 NOKTA CANLI PREVIEW TETİKLEYİCİ
           if (rightTriggerPressed && !rightTriggerPressedLastFrame && rightController) {
             if (activeMode === "HITBOX_BUILD" && !point1) {
               point1 = new THREE.Vector3();
@@ -763,7 +763,6 @@
           }
           rightTriggerPressedLastFrame = rightTriggerPressed;
 
-          // CANLI PREVIEW GÜNCELLEMESİ
           if (activeMode === "HITBOX_BUILD" && point1 && rightController) {
             var currentRightPos = new THREE.Vector3();
             rightController.getWorldPosition(currentRightPos);
@@ -919,8 +918,11 @@
               if (Math.abs(axisY) > 0.1) FLOOR_Y -= axisY * 0.002; 
             } 
             else if (!isMenuOpen) {
-              if (Math.abs(axisX) > 0.05) {
+              // Ölü bölge (Deadzone) Uygulaması: Kendi kendine sağa sola dönmeyi engeller
+              if (Math.abs(axisX) > STICK_DEADZONE) {
                 turnValue = axisX;
+              } else {
+                turnValue = 0;
               }
             }
           }
@@ -1012,9 +1014,8 @@
 
       var effectiveFloorY = FLOOR_Y;
 
-      // --- DÜZELTİLMİŞ & STABİL HİTBOX / ZEMİN FİZİĞİ ---
+      // --- STABİL HİTBOX VE YÜZEY TESPİTİ ---
       if (hitboxVisuals.length > 0) {
-        // Zemin Tespiti (Raycast Yüksekliği Sabitlendi)
         var rayOrigin = new THREE.Vector3(carMesh.position.x, carMesh.position.y + 0.1, carMesh.position.z);
         downRaycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
 
@@ -1025,40 +1026,10 @@
             effectiveFloorY = topHit.point.y;
           }
         }
-
-        // Yan Çarpışma Kontrolü (Sıkışma Önleyici Kararlı İtme Mantığı)
-        var carBox = new THREE.Box3().setFromObject(carMesh);
-        
-        for (var h = 0; h < hitboxVisuals.length; h++) {
-          var hbMesh = hitboxVisuals[h];
-          var hbBox = new THREE.Box3().setFromObject(hbMesh);
-
-          if (carBox.intersectsBox(hbBox)) {
-            var hbTopHeight = hbBox.max.y;
-
-            // Sadece araba kutunun üst yüzeyinden daha aşağıdaysa yan çarpışma olarak ele al
-            if (carMesh.position.y < hbTopHeight - 0.005) {
-              var pushDir = new THREE.Vector3().subVectors(carMesh.position, hbMesh.position);
-              pushDir.y = 0; 
-              
-              var distSq = pushDir.lengthSq();
-              if (distSq > 0.000001) {
-                pushDir.normalize();
-                carMesh.position.x += pushDir.x * 0.005;
-                carMesh.position.z += pushDir.z * 0.005;
-              }
-
-              velocity.x = 0;
-              velocity.z = 0;
-              currentSpeed = 0;
-              break;
-            }
-          }
-        }
       }
 
       var currentMinY = effectiveFloorY + carHeightOffset;
-      var isGroundedNow = (carMesh.position.y <= currentMinY + 0.002);
+      var isGroundedNow = (carMesh.position.y <= currentMinY + 0.003);
 
       // PLATFORMDAN DÜŞÜŞ VE DEVRİLME
       if (wasGroundedLastFrame && !isGroundedNow && carMesh.position.y > FLOOR_Y + CAR_HEIGHT_UPRIGHT) {
@@ -1108,16 +1079,17 @@
 
             velocity.x *= 0.95;
             velocity.z *= 0.95;
-            angularVelocity.multiplyScalar(0.2);
+            angularVelocity.set(0, 0, 0);
 
-            if (velocity.length() < 0.01) {
+            if (velocity.length() < 0.001) {
               velocity.set(0, 0, 0);
             }
           }
 
-          smoothAlignToFloor(!isUpright, 0.25);
+          // Zeminde yatay hizalama (Gimbal Lock önleyici)
+          smoothAlignToFloor(!isUpright, 0.3);
 
-          // NORMAL SÜRÜŞ KONTROLÜ
+          // SÜRÜŞ KONTROLÜ
           if (isUpright && !isMenuOpen) {
             if (isThrottlePressed) {
               if (currentSpeed > MAX_SPEED_FORWARD) {
@@ -1137,7 +1109,8 @@
               if (Math.abs(currentSpeed) < 0.00005) currentSpeed = 0;
             }
 
-            if (currentSpeed !== 0 && Math.abs(turnValue) > 0.02) {
+            // Sadece direksiyon çevriliyorsa ve hız varsa yönü çevir
+            if (currentSpeed !== 0 && Math.abs(turnValue) > STICK_DEADZONE) {
               var speedRatio = Math.abs(currentSpeed) / Math.abs(MAX_SPEED_FORWARD);
               var effectiveTurn = turnValue * Math.pow(speedRatio, 0.5); 
               var directionMultiplier = currentSpeed < 0 ? 1 : -1;
